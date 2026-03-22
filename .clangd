@@ -1,0 +1,4 @@
+CompileFlags:
+  Add: [-Wno-everything, -ferror-limit=0]
+Diagnostics:
+  Suppress: "*"
