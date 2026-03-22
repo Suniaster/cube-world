@@ -43,9 +43,12 @@ protected:
 	void ZoomCamera(float Value);
 
 protected:
+	/** Updates the procedural animation variables and meshes based on movement */
+	void UpdateProceduralAnimation(float DeltaTime);
+
 	// Procedural Animation variables
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Procedural Animation")
-	float WalkAnimSpeed = 1.0f;
+	float WalkAnimSpeed = 1.4f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Procedural Animation")
 	float MaxWalkAngle = 25.0f;

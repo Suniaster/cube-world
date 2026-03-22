@@ -1,7 +1,7 @@
 
 Steps to creating the game:
 - Creating a controllable character:
-    - Third person
+    - Third person (Done)
     - Have it been styled with cubeworld like features
     - Make it so its movement is proceduraly generated (Done)
     - Create simple animation for running (Done)
