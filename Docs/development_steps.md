@@ -18,10 +18,10 @@ Steps to creating the game:
     - Create areas with biomes (forest, plains, snow)
 - Creating a simple enemy:
     - Only needs simple style
+    - Create hp ui's
     - Important to refine next steps
 - Create simple attack
     - Create hitboxes
-    - Create hp ui's
     - Explore soundeffects
 - Create a user inventory
     - Define Item class
