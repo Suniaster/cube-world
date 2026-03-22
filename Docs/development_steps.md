@@ -1,17 +1,20 @@
 
 Steps to creating the game:
-- Creating a controllable character:
+- Creating a controllable character: (Done)
     - Third person (Done)
-    - Have it been styled with cubeworld like features
+    - Have it been styled with cubeworld like features (Done)
     - Make it so its movement is proceduraly generated (Done)
     - Create simple animation for running (Done)
     - Make it blend well with standing still (Done)
     - Create animation for jumping (Done)
     - Make it blend well with other states (Done) 
-    - Make a Dash like animation, or a roll
-    - Make animations transitions as smooth as possible, making the game have a great feeling on it.
-- Create an simple environment:
-    - Have the world have a nonflat shape
+    - Make a Dash like animation, or a roll (Done)
+    - Make animations transitions as smooth as possible, making the game have a great feeling on it. (Done)
+- Create an simple environment: (In Progress)
+    - Chunk-based procedural terrain with Perlin noise (Done)
+    - Height-based cube-world colorization (Done)
+    - ChunkWorldManager for dynamic loading/unloading (Done)
+    - Have the world have a nonflat shape (Done)
     - Add props to make the world more vivid (grass, trees)
     - Ensure the artstyle in the world make sense (colors, terrain shape, tree shapes)
     - Create a simple sky
