@@ -60,3 +60,5 @@ Automation/
 
 # Unreal compiled C# files
 Source/**/*.generated.cs
+
+*.code-workspace
