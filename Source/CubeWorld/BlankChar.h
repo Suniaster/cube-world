@@ -41,6 +41,17 @@ protected:
 
 	/** Called for zoom input */
 	void ZoomCamera(float Value);
+
+protected:
+	// Procedural Animation variables
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Procedural Animation")
+	float WalkAnimSpeed = 1.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Procedural Animation")
+	float MaxWalkAngle = 25.0f;
+
+	float WalkTimer = 0.0f;
+
 public:	
 	// The separate voxel parts
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Voxel Character")

@@ -3,11 +3,11 @@ Steps to creating the game:
 - Creating a controllable character:
     - Third person
     - Have it been styled with cubeworld like features
-    - Make it so its movement is proceduraly generated
-    - Create simple animation for running
-    - Make it blend well with standing still
-    - Create animation for jumping
-    - Make it blend well with other states 
+    - Make it so its movement is proceduraly generated (Done)
+    - Create simple animation for running (Done)
+    - Make it blend well with standing still (Done)
+    - Create animation for jumping (Done)
+    - Make it blend well with other states (Done) 
     - Make a Dash like animation, or a roll
     - Make animations transitions as smooth as possible, making the game have a great feeling on it.
 - Create an simple environment:

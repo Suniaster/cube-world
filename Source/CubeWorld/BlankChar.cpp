@@ -105,7 +105,64 @@ ABlankChar::ABlankChar() {
 void ABlankChar::BeginPlay() { Super::BeginPlay(); }
 
 // Called every frame
-void ABlankChar::Tick(float DeltaTime) { Super::Tick(DeltaTime); }
+void ABlankChar::Tick(float DeltaTime) {
+  Super::Tick(DeltaTime);
+
+  // Procedural Walking Animation
+  if (GetCharacterMovement()) {
+    float Speed = GetVelocity().Size2D();
+    bool bIsFalling = GetCharacterMovement()->IsFalling();
+
+    FRotator TargetHandR = FRotator::ZeroRotator;
+    FRotator TargetHandL = FRotator::ZeroRotator;
+    FRotator TargetFootR = FRotator::ZeroRotator;
+    FRotator TargetFootL = FRotator::ZeroRotator;
+    FVector TargetTorso = FVector::ZeroVector;
+
+    if (bIsFalling) {
+      // Mario-style jump pose
+      WalkTimer = 0.0f; // Reset walk timer so landing is smooth
+
+      TargetHandR = FRotator(0.0f, 0.0f, MaxWalkAngle);
+      TargetHandL = FRotator(0.0f, 0.0f, -MaxWalkAngle);
+      TargetFootR = FRotator(0.0f, 0.0f, MaxWalkAngle);
+      TargetFootL = FRotator(0.0f, 0.0f, -MaxWalkAngle);
+    } else if (Speed > 10.0f) {
+      // Increment timer based on speed
+      WalkTimer += DeltaTime * (Speed / 100.0f) * WalkAnimSpeed;
+
+      // Calculate angles (arms opposite to legs)
+      float SwingAngle = FMath::Sin(WalkTimer) * MaxWalkAngle;
+
+      TargetHandR = FRotator(0.0f, 0.0f, SwingAngle);
+      TargetHandL = FRotator(0.0f, 0.0f, -SwingAngle);
+      TargetFootR = FRotator(0.0f, 0.0f, -SwingAngle);
+      TargetFootL = FRotator(0.0f, 0.0f, SwingAngle);
+
+      // Bobbing effect
+      float BobOffset = FMath::Abs(FMath::Sin(WalkTimer)) * 5.0f;
+      TargetTorso = FVector(0.0f, 0.0f, BobOffset);
+    } else {
+      // Smoothly return to default pose
+      WalkTimer = 0.0f;
+    }
+
+    // Apply smooth interpolation for all parts
+    HandRMesh->SetRelativeRotation(FMath::RInterpTo(
+        HandRMesh->GetRelativeRotation(), TargetHandR, DeltaTime, 15.0f));
+    HandLMesh->SetRelativeRotation(FMath::RInterpTo(
+        HandLMesh->GetRelativeRotation(), TargetHandL, DeltaTime, 15.0f));
+    FootRMesh->SetRelativeRotation(FMath::RInterpTo(
+        FootRMesh->GetRelativeRotation(), TargetFootR, DeltaTime, 15.0f));
+    FootLMesh->SetRelativeRotation(FMath::RInterpTo(
+        FootLMesh->GetRelativeRotation(), TargetFootL, DeltaTime, 15.0f));
+
+    TorsoMesh->SetRelativeLocation(FMath::VInterpTo(
+        TorsoMesh->GetRelativeLocation(), TargetTorso, DeltaTime, 15.0f));
+    HeadMesh->SetRelativeLocation(FMath::VInterpTo(
+        HeadMesh->GetRelativeLocation(), TargetTorso, DeltaTime, 15.0f));
+  }
+}
 
 // Called to bind functionality to input
 void ABlankChar::SetupPlayerInputComponent(

@@ -8,3 +8,6 @@ This document contains essential instructions and advice designed to help the AI
 Whenever implementing logic, creating classes, handling game mechanics, or building systems, **always strictly prefer C++ over Blueprints**. 
 - Blueprints should primarily be used for configuring data (data-only blueprints), setting up UI layouts, linking visual assets (meshes, materials), or very simple high-level event wiring.
 - Core game logic, systems, components, and performance-critical code must always be written in C++.
+
+### 2. Look at the development state at `Docs/development_steps.md`
+Look at the development steps file and update it as the development progresses
