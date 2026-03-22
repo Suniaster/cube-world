@@ -123,7 +123,9 @@ void ABlankChar::UpdateProceduralAnimation(float DeltaTime) {
 
     ResetProceduralPose();
 
-    if (bIsFalling) {
+    if (bIsRolling) {
+      UpdateRollPose(DeltaTime);
+    } else if (bIsFalling) {
       UpdateJumpPose();
     } else if (Speed > 10.0f) {
       UpdateWalkPose(DeltaTime, Speed);
@@ -149,6 +151,10 @@ void ABlankChar::ResetProceduralPose() {
   TargetHandL_Loc = FVector::ZeroVector;
   TargetFootR_Loc = FVector::ZeroVector;
   TargetFootL_Loc = FVector::ZeroVector;
+
+  // Default mesh transform
+  TargetMeshLoc = FVector(0.0f, 0.0f, -88.0f);
+  TargetMeshRot = FRotator(0.0f, -90.0f, 0.0f);
 }
 
 void ABlankChar::UpdateJumpPose() {
@@ -219,37 +225,135 @@ void ABlankChar::UpdateWalkPose(float DeltaTime, float Speed) {
 }
 
 void ABlankChar::ApplyProceduralPose(float DeltaTime) {
-  // Apply smooth interpolation for all parts
+  // Apply smooth interpolation for all body parts
+  float PartInterp = 15.0f;
   HandRMesh->SetRelativeRotation(FMath::RInterpTo(
-      HandRMesh->GetRelativeRotation(), TargetHandR_Rot, DeltaTime, 15.0f));
+      HandRMesh->GetRelativeRotation(), TargetHandR_Rot, DeltaTime, PartInterp));
   HandLMesh->SetRelativeRotation(FMath::RInterpTo(
-      HandLMesh->GetRelativeRotation(), TargetHandL_Rot, DeltaTime, 15.0f));
+      HandLMesh->GetRelativeRotation(), TargetHandL_Rot, DeltaTime, PartInterp));
 
   HandRMesh->SetRelativeLocation(FMath::VInterpTo(
-      HandRMesh->GetRelativeLocation(), TargetHandR_Loc, DeltaTime, 15.0f));
+      HandRMesh->GetRelativeLocation(), TargetHandR_Loc, DeltaTime, PartInterp));
   HandLMesh->SetRelativeLocation(FMath::VInterpTo(
-      HandLMesh->GetRelativeLocation(), TargetHandL_Loc, DeltaTime, 15.0f));
-      
+      HandLMesh->GetRelativeLocation(), TargetHandL_Loc, DeltaTime, PartInterp));
+
   FootRMesh->SetRelativeRotation(FMath::RInterpTo(
-      FootRMesh->GetRelativeRotation(), TargetFootR_Rot, DeltaTime, 15.0f));
+      FootRMesh->GetRelativeRotation(), TargetFootR_Rot, DeltaTime, PartInterp));
   FootLMesh->SetRelativeRotation(FMath::RInterpTo(
-      FootLMesh->GetRelativeRotation(), TargetFootL_Rot, DeltaTime, 15.0f));
+      FootLMesh->GetRelativeRotation(), TargetFootL_Rot, DeltaTime, PartInterp));
 
   FootRMesh->SetRelativeLocation(FMath::VInterpTo(
-      FootRMesh->GetRelativeLocation(), TargetFootR_Loc, DeltaTime, 15.0f));
+      FootRMesh->GetRelativeLocation(), TargetFootR_Loc, DeltaTime, PartInterp));
   FootLMesh->SetRelativeLocation(FMath::VInterpTo(
-      FootLMesh->GetRelativeLocation(), TargetFootL_Loc, DeltaTime, 15.0f));
+      FootLMesh->GetRelativeLocation(), TargetFootL_Loc, DeltaTime, PartInterp));
 
   TorsoMesh->SetRelativeLocation(FMath::VInterpTo(
-      TorsoMesh->GetRelativeLocation(), TargetTorso_Loc, DeltaTime, 15.0f));
+      TorsoMesh->GetRelativeLocation(), TargetTorso_Loc, DeltaTime, PartInterp));
   HeadMesh->SetRelativeLocation(FMath::VInterpTo(
-      HeadMesh->GetRelativeLocation(), TargetTorso_Loc, DeltaTime, 15.0f));
+      HeadMesh->GetRelativeLocation(), TargetTorso_Loc, DeltaTime, PartInterp));
 
   TorsoMesh->SetRelativeRotation(FMath::RInterpTo(
-      TorsoMesh->GetRelativeRotation(), TargetTorsoRot, DeltaTime, 15.0f));
+      TorsoMesh->GetRelativeRotation(), TargetTorsoRot, DeltaTime, PartInterp));
   HeadMesh->SetRelativeRotation(FMath::RInterpTo(
-      HeadMesh->GetRelativeRotation(), TargetHeadRot, DeltaTime, 15.0f));
+      HeadMesh->GetRelativeRotation(), TargetHeadRot, DeltaTime, PartInterp));
+
+  // Apply root mesh transform (snaps during roll, lerps back after)
+  if (bIsRolling) {
+    GetMesh()->SetRelativeLocation(TargetMeshLoc);
+    GetMesh()->SetRelativeRotation(TargetMeshRot);
+  } else {
+    FVector DefaultMeshLoc(0.0f, 0.0f, -88.0f);
+    FRotator DefaultMeshRot(0.0f, -90.0f, 0.0f);
+    GetMesh()->SetRelativeLocation(FMath::VInterpTo(
+        GetMesh()->GetRelativeLocation(), DefaultMeshLoc, DeltaTime, PartInterp));
+    GetMesh()->SetRelativeRotation(FMath::RInterpTo(
+        GetMesh()->GetRelativeRotation(), DefaultMeshRot, DeltaTime, PartInterp));
+  }
 }
+
+// ── Roll Animation ──────────────────────────────────────────────────────
+
+void ABlankChar::StartRoll() {
+  // Only roll when grounded and not already rolling
+  if (bIsRolling) return;
+  if (!GetCharacterMovement() || GetCharacterMovement()->IsFalling()) return;
+
+  bIsRolling = true;
+  RollTimer = 0.0f;
+
+  // Boost movement speed during the roll
+  CachedWalkSpeed = GetCharacterMovement()->MaxWalkSpeed;
+  GetCharacterMovement()->MaxWalkSpeed = CachedWalkSpeed * RollSpeedMultiplier;
+}
+
+void ABlankChar::UpdateRollPose(float DeltaTime) {
+  // Advance normalized timer (0 -> 1)
+  RollTimer += DeltaTime / FMath::Max(RollDuration, 0.01f);
+
+  if (RollTimer >= 1.0f) {
+    RollTimer = 1.0f;
+    bIsRolling = false;
+    // Restore original walk speed
+    if (GetCharacterMovement()) {
+      GetCharacterMovement()->MaxWalkSpeed = CachedWalkSpeed;
+    }
+    return; // ResetProceduralPose already set defaults; will lerp back
+  }
+
+  // Roll angle: 0 -> 360 degrees (full forward somersault)
+  float RollAngle = RollTimer * 360.0f;
+
+  // ── Rotate the ROOT MESH around the torso-center pivot ──
+  // The mesh origin is at the feet (placed at -88 in capsule space).
+  // The torso center (spine bone) is RollPivotHeight above the mesh origin.
+  // We rotate the entire mesh around this pivot so all parts stay above ground.
+
+  FVector DefaultMeshLoc(0.0f, 0.0f, -88.0f);
+
+  // Pivot point in capsule space
+  FVector PivotCapsule = DefaultMeshLoc + FVector(0.0f, 0.0f, RollPivotHeight);
+  // Vector from pivot to mesh origin
+  FVector PivotToOrigin = FVector(0.0f, 0.0f, -RollPivotHeight);
+
+  // Forward somersault = negative pitch in UE (head goes forward)
+  FQuat PitchQ = FRotator(-RollAngle, 0.0f, 0.0f).Quaternion();
+  FQuat DefaultQ = FRotator(0.0f, -90.0f, 0.0f).Quaternion();
+
+  // Add a Z-axis wobble (yaw oscillation) for a dynamic feel
+  float WobbleAngle = -5.0f;
+  FQuat WobbleQ = FRotator(0.0f, WobbleAngle, 0.0f).Quaternion();
+
+  // Compose: default rotation, then pitch somersault, then yaw wobble
+  FQuat FinalQ = WobbleQ * PitchQ * DefaultQ;
+  TargetMeshRot = FinalQ.Rotator();
+
+  // Rotate the pivot-to-origin vector to find new mesh origin position
+  FVector RotatedOffset = PitchQ.RotateVector(PivotToOrigin);
+  TargetMeshLoc = PivotCapsule + RotatedOffset;
+
+  // Individual parts get expressive poses while the root mesh rolls.
+
+  // Hands raised up high (Z = up in bone-relative space)
+  TargetHandR_Loc = FVector(0.0f, 25.0f, 100.0f);
+  TargetHandL_Loc = FVector(0.0f, -25.0f, 100.0f);
+
+  // Feet in jump-split pose (same as UpdateJumpPose)
+  float JumpAngle = 45.0f;
+  TargetFootR_Rot = FRotator(0.0f, 0.0f, JumpAngle);
+  TargetFootL_Rot = FRotator(0.0f, 0.0f, -JumpAngle);
+
+  float LegLength = 70.0f;
+  float RRad = FMath::DegreesToRadians(JumpAngle);
+  float LRad = FMath::DegreesToRadians(-JumpAngle);
+  TargetFootR_Loc = FVector(0.0f, -LegLength * FMath::Sin(RRad),
+                            LegLength * (1.0f - FMath::Cos(RRad)));
+  TargetFootL_Loc = FVector(0.0f, -LegLength * FMath::Sin(LRad),
+                            LegLength * (1.0f - FMath::Cos(LRad)));
+
+  WalkTimer = 0.0f;
+}
+
+// ── Input Bindings ──────────────────────────────────────────────────────
 
 // Called to bind functionality to input
 void ABlankChar::SetupPlayerInputComponent(
@@ -260,6 +364,10 @@ void ABlankChar::SetupPlayerInputComponent(
   PlayerInputComponent->BindAction("Jump", IE_Pressed, this, &ACharacter::Jump);
   PlayerInputComponent->BindAction("Jump", IE_Released, this,
                                    &ACharacter::StopJumping);
+
+  // Bind roll
+  PlayerInputComponent->BindAction("Roll", IE_Pressed, this,
+                                   &ABlankChar::StartRoll);
 
   // Bind movement events
   PlayerInputComponent->BindAxis("MoveForward", this, &ABlankChar::MoveForward);

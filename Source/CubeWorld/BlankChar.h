@@ -49,6 +49,10 @@ protected:
 	void UpdateJumpPose();
 	void UpdateWalkPose(float DeltaTime, float Speed);
 	void ResetProceduralPose();
+
+	/** Roll animation */
+	void StartRoll();
+	void UpdateRollPose(float DeltaTime);
 	void ApplyProceduralPose(float DeltaTime);
 
 	// Target procedural poses
@@ -73,6 +77,26 @@ protected:
 	float MaxWalkAngle = 25.0f;
 
 	float WalkTimer = 0.0f;
+
+	// Roll state
+	bool bIsRolling = false;
+	float RollTimer = 0.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Procedural Animation")
+	float RollDuration = 0.45f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Procedural Animation")
+	float RollSpeedMultiplier = 2.f;
+
+	float CachedWalkSpeed = 0.0f;
+
+	/** Height of the torso pivot above the mesh origin (feet). Adjust to match skeleton. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Procedural Animation")
+	float RollPivotHeight = 110.0f;
+
+	// Root mesh transform targets (used during roll)
+	FVector TargetMeshLoc;
+	FRotator TargetMeshRot;
 
 public:	
 	// The separate voxel parts
