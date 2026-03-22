@@ -1,0 +1,34 @@
+- Features:
+    - Openworld
+    - Simple crafting
+    - Gathering
+    - Variety of enemies
+    - Progression through bosses
+    - ARPG format Equipments
+    - Market
+    - Seasonal Leagues
+    - Coop
+    - No riged class system
+    - Dinamic magic system [See `magic_system.md` for details]
+- Archetypes:
+    - Martial artist
+        - Warrior
+        - Archer
+        - Lancer
+        - Assassin
+    - Magic users
+        - Caster
+        - Healer
+        - Buffer
+
+- Gameplay is the primary focus.
+- Movement must feel good to play. Walking, running, jumping should all be a big focus at early development, not visuals.
+
+- Made for coop gameplay but should be soloable
+
+- Progression in the game through tiers.
+- Tiers for equipment, spells and weapons
+- Tiers progress with distance from a city.
+- Player should be able to fast travel easily in two ways:
+    - Teleport anywhere to last visited city
+    - Teleport from city to others city expending something

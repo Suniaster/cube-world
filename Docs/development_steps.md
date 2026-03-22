@@ -1,0 +1,58 @@
+
+Steps to creating the game:
+- Creating a controllable character:
+    - Third person
+    - Have it been styled with cubeworld like features
+    - Make it so its movement is proceduraly generated
+    - Create simple animation for running
+    - Make it blend well with standing still
+    - Create animation for jumping
+    - Make it blend well with other states 
+    - Make a Dash like animation, or a roll
+    - Make animations transitions as smooth as possible, making the game have a great feeling on it.
+- Create an simple environment:
+    - Have the world have a nonflat shape
+    - Add props to make the world more vivid (grass, trees)
+    - Ensure the artstyle in the world make sense (colors, terrain shape, tree shapes)
+    - Create a simple sky
+    - Create areas with biomes (forest, plains, snow)
+- Creating a simple enemy:
+    - Only needs simple style
+    - Important to refine next steps
+- Create simple attack
+    - Create hitboxes
+    - Create hp ui's
+    - Explore soundeffects
+- Create a user inventory
+    - Define Item class
+    - Create simple items to test storage
+    - Explore commands in UE 
+    - Visible bar with items to select
+- Create the magic system:
+    - Define what is a spell
+    - Implement a way to create new spells (they dont need to actually do something for now, just exist)
+    - Create the visualization of the spells
+    - Implement damage formulas for magic
+    - Test it against enemies
+- Create Character attributes
+    - Health / Mana (Visible in UI)
+    - Int / Str / Dex / Luck / Defenses
+    - Define damage formulas
+- Create base weapon types (they dont need to work for now):
+    - Bow
+    - One Handed Sword
+    - Two handed Sword 
+    - Shield
+    - Dagger
+    - Wand
+    - Staff
+- Create simple Affixes system for weapons
+- Create UI for hovering mouse and seeing stats
+- Create simple boss 
+    - Should be able to move and attack
+- Create skill system:
+    - Add a UI bar for usable skills
+    - Skills can be:
+        - Active or Passive
+        - Attacks  or Spells
+    - Add one attack with animation for each martial weapon
