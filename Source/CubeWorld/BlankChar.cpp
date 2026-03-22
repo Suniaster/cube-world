@@ -121,115 +121,134 @@ void ABlankChar::UpdateProceduralAnimation(float DeltaTime) {
     float Speed = GetVelocity().Size2D();
     bool bIsFalling = GetCharacterMovement()->IsFalling();
 
-    FRotator TargetHandR = FRotator::ZeroRotator;
-    FRotator TargetHandL = FRotator::ZeroRotator;
-    FRotator TargetFootR = FRotator::ZeroRotator;
-    FRotator TargetFootL = FRotator::ZeroRotator;
-    FVector TargetTorso = FVector::ZeroVector;
-    FRotator TargetTorsoRot = FRotator::ZeroRotator;
-    FRotator TargetHeadRot = FRotator::ZeroRotator;
-
-    FVector TargetFootR_Loc = FVector::ZeroVector;
-    FVector TargetFootL_Loc = FVector::ZeroVector;
-
-    FVector TargetHandR_Loc = FVector::ZeroVector;
-    FVector TargetHandL_Loc = FVector::ZeroVector;
+    ResetProceduralPose();
 
     if (bIsFalling) {
-      // Mario-style jump pose
-      WalkTimer = 0.0f; // Reset walk timer so landing is smooth
-
-      TargetHandR = FRotator::ZeroRotator;
-      TargetHandL = FRotator::ZeroRotator;
-      TargetHandR_Loc = FVector(0.0f, -20.0f, 0.0f);
-      TargetHandL_Loc = FVector(0.0f, 20.0f, 0.0f);
-
-      TargetFootR = FRotator(0.0f, 0.0f, MaxWalkAngle);
-      TargetFootL = FRotator(0.0f, 0.0f, -MaxWalkAngle);
-
-      float LegLength = 40.0f;
-      float RRad = FMath::DegreesToRadians(MaxWalkAngle);
-      float LRad = FMath::DegreesToRadians(-MaxWalkAngle);
-      TargetFootR_Loc = FVector(0.0f, -LegLength * FMath::Sin(RRad),
-                                LegLength * (1.0f - FMath::Cos(RRad)));
-      TargetFootL_Loc = FVector(0.0f, -LegLength * FMath::Sin(LRad),
-                                LegLength * (1.0f - FMath::Cos(LRad)));
+      UpdateJumpPose();
     } else if (Speed > 10.0f) {
-      // Increment timer based on speed
-      WalkTimer += DeltaTime * (Speed / 100.0f) * WalkAnimSpeed;
-
-      // Bobbing effect
-      float BobOffset = FMath::Abs(FMath::Sin(WalkTimer)) * 5.0f;
-      TargetTorso = FVector(0.0f, 0.0f, BobOffset);
-
-      // Wobbling rotation on Z axis (Yaw) for fluidity
-      float TorsoYaw = FMath::Sin(WalkTimer) * 10.0f;
-
-      // Incline forward slightly while moving and apply wobble
-      TargetTorsoRot = FRotator(0.0f, TorsoYaw, 15.0f);
-      TargetHeadRot = FRotator(0.0f, TorsoYaw * 0.5f, 15.0f);
-
-      // Calculate hands sliding forward and backward
-      float HandSwing = FMath::Sin(WalkTimer) * 30.0f;
-
-      TargetHandR = TargetTorsoRot;
-      TargetHandL = TargetTorsoRot;
-      TargetHandR_Loc = FVector(0.0f, -HandSwing, 0.0f);
-      TargetHandL_Loc = FVector(0.0f, HandSwing, 0.0f);
-
-      // Feet make a semi circle motion (-90 to 90 degrees)
-      float FootSwingAngle = FMath::Sin(WalkTimer) * 90.0f;
-      TargetFootR = FRotator(0.0f, 0.0f, -FootSwingAngle);
-      TargetFootL = FRotator(0.0f, 0.0f, FootSwingAngle);
-
-      float LegLength = 70.0f;
-      float RRad = FMath::DegreesToRadians(-FootSwingAngle);
-      float LRad = FMath::DegreesToRadians(FootSwingAngle);
-
-      // Offset feet forward to stay centered under the leaning torso
-      float LeanOffset = -15.0f;
-
-      TargetFootR_Loc =
-          FVector(0.0f, -LegLength * FMath::Sin(RRad) - LeanOffset,
-                  LegLength * (1.0f - FMath::Cos(RRad)));
-      TargetFootL_Loc =
-          FVector(0.0f, -LegLength * FMath::Sin(LRad) - LeanOffset,
-                  LegLength * (1.0f - FMath::Cos(LRad)));
+      UpdateWalkPose(DeltaTime, Speed);
     } else {
       // Smoothly return to default pose
       WalkTimer = 0.0f;
     }
 
-    // Apply smooth interpolation for all parts
-    HandRMesh->SetRelativeRotation(FMath::RInterpTo(
-        HandRMesh->GetRelativeRotation(), TargetHandR, DeltaTime, 15.0f));
-    HandLMesh->SetRelativeRotation(FMath::RInterpTo(
-        HandLMesh->GetRelativeRotation(), TargetHandL, DeltaTime, 15.0f));
-
-    HandRMesh->SetRelativeLocation(FMath::VInterpTo(
-        HandRMesh->GetRelativeLocation(), TargetHandR_Loc, DeltaTime, 15.0f));
-    HandLMesh->SetRelativeLocation(FMath::VInterpTo(
-        HandLMesh->GetRelativeLocation(), TargetHandL_Loc, DeltaTime, 15.0f));
-    FootRMesh->SetRelativeRotation(FMath::RInterpTo(
-        FootRMesh->GetRelativeRotation(), TargetFootR, DeltaTime, 15.0f));
-    FootLMesh->SetRelativeRotation(FMath::RInterpTo(
-        FootLMesh->GetRelativeRotation(), TargetFootL, DeltaTime, 15.0f));
-
-    FootRMesh->SetRelativeLocation(FMath::VInterpTo(
-        FootRMesh->GetRelativeLocation(), TargetFootR_Loc, DeltaTime, 15.0f));
-    FootLMesh->SetRelativeLocation(FMath::VInterpTo(
-        FootLMesh->GetRelativeLocation(), TargetFootL_Loc, DeltaTime, 15.0f));
-
-    TorsoMesh->SetRelativeLocation(FMath::VInterpTo(
-        TorsoMesh->GetRelativeLocation(), TargetTorso, DeltaTime, 15.0f));
-    HeadMesh->SetRelativeLocation(FMath::VInterpTo(
-        HeadMesh->GetRelativeLocation(), TargetTorso, DeltaTime, 15.0f));
-
-    TorsoMesh->SetRelativeRotation(FMath::RInterpTo(
-        TorsoMesh->GetRelativeRotation(), TargetTorsoRot, DeltaTime, 15.0f));
-    HeadMesh->SetRelativeRotation(FMath::RInterpTo(
-        HeadMesh->GetRelativeRotation(), TargetHeadRot, DeltaTime, 15.0f));
+    ApplyProceduralPose(DeltaTime);
   }
+}
+
+void ABlankChar::ResetProceduralPose() {
+  TargetHandR_Rot = FRotator::ZeroRotator;
+  TargetHandL_Rot = FRotator::ZeroRotator;
+  TargetFootR_Rot = FRotator::ZeroRotator;
+  TargetFootL_Rot = FRotator::ZeroRotator;
+  TargetTorsoRot = FRotator::ZeroRotator;
+  TargetHeadRot = FRotator::ZeroRotator;
+
+  TargetTorso_Loc = FVector::ZeroVector;
+  TargetHandR_Loc = FVector::ZeroVector;
+  TargetHandL_Loc = FVector::ZeroVector;
+  TargetFootR_Loc = FVector::ZeroVector;
+  TargetFootL_Loc = FVector::ZeroVector;
+}
+
+void ABlankChar::UpdateJumpPose() {
+  // Mario-style jump pose
+  WalkTimer = 0.0f; // Reset walk timer so landing is smooth
+
+  // Hands stretch to match max walk swing
+  TargetHandR_Loc = FVector(0.0f, -30.0f, 0.0f);
+  TargetHandL_Loc = FVector(0.0f, 30.0f, 0.0f);
+
+  // Exaggerate jump leg split
+  float JumpAngle = 45.0f;
+  TargetFootR_Rot = FRotator(0.0f, 0.0f, JumpAngle);
+  TargetFootL_Rot = FRotator(0.0f, 0.0f, -JumpAngle);
+
+  // Match walk leg length scale
+  float LegLength = 70.0f;
+  float RRad = FMath::DegreesToRadians(JumpAngle);
+  float LRad = FMath::DegreesToRadians(-JumpAngle);
+  
+  TargetFootR_Loc = FVector(0.0f, -LegLength * FMath::Sin(RRad),
+                            LegLength * (1.0f - FMath::Cos(RRad)));
+  TargetFootL_Loc = FVector(0.0f, -LegLength * FMath::Sin(LRad),
+                            LegLength * (1.0f - FMath::Cos(LRad)));
+}
+
+void ABlankChar::UpdateWalkPose(float DeltaTime, float Speed) {
+  // Increment timer based on speed
+  WalkTimer += DeltaTime * (Speed / 100.0f) * WalkAnimSpeed;
+
+  // Bobbing effect
+  float BobOffset = FMath::Abs(FMath::Sin(WalkTimer)) * 5.0f;
+  TargetTorso_Loc = FVector(0.0f, 0.0f, BobOffset);
+
+  // Wobbling rotation on Z axis (Yaw) for fluidity
+  float TorsoYaw = FMath::Sin(WalkTimer) * 10.0f;
+
+  // Incline forward slightly while moving and apply wobble
+  TargetTorsoRot = FRotator(0.0f, TorsoYaw, 15.0f);
+  TargetHeadRot = FRotator(0.0f, TorsoYaw * 0.5f, 15.0f);
+
+  // Calculate hands sliding forward and backward
+  float HandSwing = FMath::Sin(WalkTimer) * 30.0f;
+
+  TargetHandR_Rot = TargetTorsoRot;
+  TargetHandL_Rot = TargetTorsoRot;
+  TargetHandR_Loc = FVector(0.0f, -HandSwing, 0.0f);
+  TargetHandL_Loc = FVector(0.0f, HandSwing, 0.0f);
+
+  // Feet make a semi circle motion (-90 to 90 degrees)
+  float FootSwingAngle = FMath::Sin(WalkTimer) * 90.0f;
+  TargetFootR_Rot = FRotator(0.0f, 0.0f, -FootSwingAngle);
+  TargetFootL_Rot = FRotator(0.0f, 0.0f, FootSwingAngle);
+
+  float LegLength = 70.0f;
+  float RRad = FMath::DegreesToRadians(-FootSwingAngle);
+  float LRad = FMath::DegreesToRadians(FootSwingAngle);
+
+  // Offset feet forward to stay centered under the leaning torso
+  float LeanOffset = -15.0f;
+
+  TargetFootR_Loc =
+      FVector(0.0f, -LegLength * FMath::Sin(RRad) - LeanOffset,
+              LegLength * (1.0f - FMath::Cos(RRad)));
+  TargetFootL_Loc =
+      FVector(0.0f, -LegLength * FMath::Sin(LRad) - LeanOffset,
+              LegLength * (1.0f - FMath::Cos(LRad)));
+}
+
+void ABlankChar::ApplyProceduralPose(float DeltaTime) {
+  // Apply smooth interpolation for all parts
+  HandRMesh->SetRelativeRotation(FMath::RInterpTo(
+      HandRMesh->GetRelativeRotation(), TargetHandR_Rot, DeltaTime, 15.0f));
+  HandLMesh->SetRelativeRotation(FMath::RInterpTo(
+      HandLMesh->GetRelativeRotation(), TargetHandL_Rot, DeltaTime, 15.0f));
+
+  HandRMesh->SetRelativeLocation(FMath::VInterpTo(
+      HandRMesh->GetRelativeLocation(), TargetHandR_Loc, DeltaTime, 15.0f));
+  HandLMesh->SetRelativeLocation(FMath::VInterpTo(
+      HandLMesh->GetRelativeLocation(), TargetHandL_Loc, DeltaTime, 15.0f));
+      
+  FootRMesh->SetRelativeRotation(FMath::RInterpTo(
+      FootRMesh->GetRelativeRotation(), TargetFootR_Rot, DeltaTime, 15.0f));
+  FootLMesh->SetRelativeRotation(FMath::RInterpTo(
+      FootLMesh->GetRelativeRotation(), TargetFootL_Rot, DeltaTime, 15.0f));
+
+  FootRMesh->SetRelativeLocation(FMath::VInterpTo(
+      FootRMesh->GetRelativeLocation(), TargetFootR_Loc, DeltaTime, 15.0f));
+  FootLMesh->SetRelativeLocation(FMath::VInterpTo(
+      FootLMesh->GetRelativeLocation(), TargetFootL_Loc, DeltaTime, 15.0f));
+
+  TorsoMesh->SetRelativeLocation(FMath::VInterpTo(
+      TorsoMesh->GetRelativeLocation(), TargetTorso_Loc, DeltaTime, 15.0f));
+  HeadMesh->SetRelativeLocation(FMath::VInterpTo(
+      HeadMesh->GetRelativeLocation(), TargetTorso_Loc, DeltaTime, 15.0f));
+
+  TorsoMesh->SetRelativeRotation(FMath::RInterpTo(
+      TorsoMesh->GetRelativeRotation(), TargetTorsoRot, DeltaTime, 15.0f));
+  HeadMesh->SetRelativeRotation(FMath::RInterpTo(
+      HeadMesh->GetRelativeRotation(), TargetHeadRot, DeltaTime, 15.0f));
 }
 
 // Called to bind functionality to input

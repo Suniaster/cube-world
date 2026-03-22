@@ -46,9 +46,28 @@ protected:
 	/** Updates the procedural animation variables and meshes based on movement */
 	void UpdateProceduralAnimation(float DeltaTime);
 
+	void UpdateJumpPose();
+	void UpdateWalkPose(float DeltaTime, float Speed);
+	void ResetProceduralPose();
+	void ApplyProceduralPose(float DeltaTime);
+
+	// Target procedural poses
+	FRotator TargetHeadRot;
+	FRotator TargetTorsoRot;
+	FRotator TargetHandR_Rot;
+	FRotator TargetHandL_Rot;
+	FRotator TargetFootR_Rot;
+	FRotator TargetFootL_Rot;
+
+	FVector TargetTorso_Loc;
+	FVector TargetHandR_Loc;
+	FVector TargetHandL_Loc;
+	FVector TargetFootR_Loc;
+	FVector TargetFootL_Loc;
+
 	// Procedural Animation variables
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Procedural Animation")
-	float WalkAnimSpeed = 1.4f;
+	float WalkAnimSpeed = 2.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Procedural Animation")
 	float MaxWalkAngle = 25.0f;
