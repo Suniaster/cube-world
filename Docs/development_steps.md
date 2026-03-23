@@ -15,7 +15,9 @@ Steps to creating the game:
     - Height-based cube-world colorization (Done)
     - ChunkWorldManager for dynamic loading/unloading (Done)
     - Have the world have a nonflat shape (Done)
-    - Add props to make the world more vivid (grass, trees)
+    - Optimize for more chunk rendering 
+    - Add some montains
+    - Add props to make the world more vivid (trees)
     - Ensure the artstyle in the world make sense (colors, terrain shape, tree shapes)
     - Create a simple sky
     - Create areas with biomes (forest, plains, snow)

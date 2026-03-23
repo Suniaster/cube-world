@@ -63,6 +63,14 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Noise")
 	float Seed = 0.0f;
 
+	/** Maximum number of chunks to load in a single frame. Prevents hitches/crashes at high distances. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Chunks")
+	int32 MaxChunksPerFrame = 10;
+
+	/** The material to apply to all chunks. If null, a default lit vertex color material is created. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Material")
+	UMaterialInterface* TerrainMaterial;
+
 private:
 	/** Currently loaded chunks, keyed by chunk coordinate. */
 	TMap<FIntPoint, AWorldChunk*> LoadedChunks;
@@ -70,6 +78,16 @@ private:
 	/** Last known player chunk coord – avoids redundant updates. */
 	FIntPoint LastPlayerChunk;
 	bool bHasLastPlayerChunk = false;
+
+	/** Queue of chunk coordinates waiting to be loaded. */
+	TArray<FIntPoint> ChunkLoadQueue;
+
+	/** Cached material created at runtime if TerrainMaterial is null. */
+	UPROPERTY()
+	UMaterialInterface* CachedRuntimeMaterial;
+
+	/** Ensures the terrain material is loaded or created. */
+	void EnsureMaterial();
 
 	/** Convert a world position to a chunk coordinate. */
 	FIntPoint WorldToChunkCoord(const FVector& WorldPos) const;

@@ -3,6 +3,11 @@
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
 #include "Engine/World.h"
+#include "Materials/Material.h"
+
+#if WITH_EDITOR
+#include "Materials/MaterialExpressionVertexColor.h"
+#endif
 
 AChunkWorldManager::AChunkWorldManager()
 {
@@ -13,9 +18,43 @@ void AChunkWorldManager::BeginPlay()
 {
 	Super::BeginPlay();
 
+	EnsureMaterial();
+
 	// Force an initial chunk load around origin
 	FIntPoint Origin(0, 0);
 	UpdateChunksAroundPlayer(Origin);
+}
+
+void AChunkWorldManager::EnsureMaterial()
+{
+	if (TerrainMaterial) return;
+	if (CachedRuntimeMaterial) return;
+
+	// Try to load a user-created material first
+	CachedRuntimeMaterial = LoadObject<UMaterialInterface>(nullptr,
+		TEXT("/Game/Materials/M_VoxelTerrain.M_VoxelTerrain"));
+
+#if WITH_EDITOR
+	if (!CachedRuntimeMaterial)
+	{
+		// Create a DefaultLit material with VertexColor → BaseColor at runtime
+		UMaterial* NewMat = NewObject<UMaterial>(GetTransientPackage(), TEXT("M_VoxelTerrain_Runtime"));
+
+		UMaterialExpressionVertexColor* VCExpr = NewObject<UMaterialExpressionVertexColor>(NewMat);
+		NewMat->GetExpressionCollection().AddExpression(VCExpr);
+
+		if (UMaterialEditorOnlyData* EditorData = NewMat->GetEditorOnlyData())
+		{
+			EditorData->BaseColor.Expression = VCExpr;
+			EditorData->BaseColor.OutputIndex = 0; // RGB
+		}
+
+		NewMat->PreEditChange(nullptr);
+		NewMat->PostEditChange();
+
+		CachedRuntimeMaterial = NewMat;
+	}
+#endif
 }
 
 void AChunkWorldManager::Tick(float DeltaTime)
@@ -29,14 +68,29 @@ void AChunkWorldManager::Tick(float DeltaTime)
 	APawn* PlayerPawn = PC->GetPawn();
 	if (!PlayerPawn) return;
 
-	FIntPoint CurrentChunk = WorldToChunkCoord(PlayerPawn->GetActorLocation());
+	FVector PlayerLoc = PlayerPawn->GetActorLocation();
+	FIntPoint CurrentChunk = WorldToChunkCoord(PlayerLoc);
 
-	// Only update when the player crosses a chunk boundary
+	// Only update the generation goal when the player crosses a chunk boundary
 	if (!bHasLastPlayerChunk || CurrentChunk != LastPlayerChunk)
 	{
 		LastPlayerChunk = CurrentChunk;
 		bHasLastPlayerChunk = true;
 		UpdateChunksAroundPlayer(CurrentChunk);
+	}
+
+	// ── Process the Load Queue (Budgeted) ──
+	int32 SpawnedThisFrame = 0;
+	while (ChunkLoadQueue.Num() > 0 && SpawnedThisFrame < MaxChunksPerFrame)
+	{
+		FIntPoint Coord = ChunkLoadQueue[0];
+		ChunkLoadQueue.RemoveAt(0);
+
+		if (!LoadedChunks.Contains(Coord))
+		{
+			LoadChunk(Coord);
+			SpawnedThisFrame++;
+		}
 	}
 }
 
@@ -74,19 +128,38 @@ void AChunkWorldManager::UpdateChunksAroundPlayer(FIntPoint PlayerChunk)
 		UnloadChunk(Coord);
 	}
 
-	// 3. Load new chunks
-	for (FIntPoint Coord : DesiredChunks)
+	// Remove no-longer-desired chunks from the queue
+	for (int32 i = ChunkLoadQueue.Num() - 1; i >= 0; --i)
 	{
-		if (!LoadedChunks.Contains(Coord))
+		if (!DesiredChunks.Contains(ChunkLoadQueue[i]))
 		{
-			LoadChunk(Coord);
+			ChunkLoadQueue.RemoveAt(i);
 		}
 	}
+
+	// 3. Queue new chunks
+	for (FIntPoint Coord : DesiredChunks)
+	{
+		if (!LoadedChunks.Contains(Coord) && !ChunkLoadQueue.Contains(Coord))
+		{
+			ChunkLoadQueue.Add(Coord);
+		}
+	}
+
+	// Sort queue by distance to player (load closest first)
+	ChunkLoadQueue.Sort([PlayerChunk](const FIntPoint& A, const FIntPoint& B) {
+		float DistA = FVector2D::DistSquared(FVector2D(A), FVector2D(PlayerChunk));
+		float DistB = FVector2D::DistSquared(FVector2D(B), FVector2D(PlayerChunk));
+		return DistA < DistB;
+	});
 }
 
 void AChunkWorldManager::LoadChunk(FIntPoint Coord)
 {
 	if (LoadedChunks.Contains(Coord)) return;
+
+	EnsureMaterial();
+	UMaterialInterface* UseMat = TerrainMaterial ? TerrainMaterial : CachedRuntimeMaterial;
 
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.Owner = this;
@@ -108,7 +181,8 @@ void AChunkWorldManager::LoadChunk(FIntPoint Coord)
 			Octaves,
 			Persistence,
 			Lacunarity,
-			Seed);
+			Seed,
+			UseMat);
 
 		LoadedChunks.Add(Coord, NewChunk);
 	}

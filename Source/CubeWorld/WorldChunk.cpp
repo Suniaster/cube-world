@@ -141,7 +141,8 @@ void AWorldChunk::GenerateChunk(
 	int32 InOctaves,
 	float InPersistence,
 	float InLacunarity,
-	float InSeed)
+	float InSeed,
+	UMaterialInterface* InMaterial)
 {
 	ChunkCoord = InChunkCoord;
 
@@ -154,7 +155,6 @@ void AWorldChunk::GenerateChunk(
 	TArray<TArray<int32>> HeightMap;
 	HeightMap.SetNum(InChunkSize);
 
-	int32 MaxHeightInChunk = 1;
 	for (int32 X = 0; X < InChunkSize; ++X)
 	{
 		HeightMap[X].SetNum(InChunkSize);
@@ -168,7 +168,6 @@ void AWorldChunk::GenerateChunk(
 				InFrequency, InAmplitude, InOctaves,
 				InPersistence, InLacunarity, InSeed);
 			HeightMap[X][Y] = H;
-			MaxHeightInChunk = FMath::Max(MaxHeightInChunk, H);
 		}
 	}
 
@@ -178,11 +177,6 @@ void AWorldChunk::GenerateChunk(
 	TArray<FVector> Normals;
 	TArray<FColor> VertexColors;
 
-	// Pre-allocate rough estimates
-	int32 EstimatedCubes = InChunkSize * InChunkSize * (MaxHeightInChunk / 2 + 1);
-	Vertices.Reserve(EstimatedCubes * 8);
-	Triangles.Reserve(EstimatedCubes * 12);
-
 	for (int32 X = 0; X < InChunkSize; ++X)
 	{
 		for (int32 Y = 0; Y < InChunkSize; ++Y)
@@ -191,12 +185,9 @@ void AWorldChunk::GenerateChunk(
 
 			for (int32 Z = 0; Z < ColumnHeight; ++Z)
 			{
-				FVector CubePos(
-					X * InVoxelSize,
-					Y * InVoxelSize,
-					Z * InVoxelSize);
+				FVector CubePos(X * InVoxelSize, Y * InVoxelSize, Z * InVoxelSize);
 
-			float WorldX = ChunkWorldX + X * InVoxelSize;
+				float WorldX = ChunkWorldX + X * InVoxelSize;
 				float WorldY = ChunkWorldY + Y * InVoxelSize;
 				FColor Color = GetVoxelColor(WorldX, WorldY);
 
@@ -233,38 +224,8 @@ void AWorldChunk::GenerateChunk(
 		EmptyTangents,
 		true);       // Create collision
 
-	// Create a proper lit material that reads vertex colors and responds to lights
-	static UMaterialInterface* VoxelMat = nullptr;
-	if (!VoxelMat)
+	if (InMaterial)
 	{
-		// Try to load a user-created material first
-		VoxelMat = LoadObject<UMaterialInterface>(nullptr,
-			TEXT("/Game/Materials/M_VoxelTerrain.M_VoxelTerrain"));
-
-#if WITH_EDITOR
-		if (!VoxelMat)
-		{
-			// Create a DefaultLit material with VertexColor → BaseColor at runtime
-			UMaterial* NewMat = NewObject<UMaterial>(GetTransientPackage(), TEXT("M_VoxelTerrain_Runtime"));
-
-			UMaterialExpressionVertexColor* VCExpr = NewObject<UMaterialExpressionVertexColor>(NewMat);
-			NewMat->GetExpressionCollection().AddExpression(VCExpr);
-
-			if (UMaterialEditorOnlyData* EditorData = NewMat->GetEditorOnlyData())
-			{
-				EditorData->BaseColor.Expression = VCExpr;
-				EditorData->BaseColor.OutputIndex = 0; // RGB
-			}
-
-			NewMat->PreEditChange(nullptr);
-			NewMat->PostEditChange();
-
-			VoxelMat = NewMat;
-		}
-#endif
-	}
-	if (VoxelMat)
-	{
-		TerrainMesh->SetMaterial(0, VoxelMat);
+		TerrainMesh->SetMaterial(0, InMaterial);
 	}
 }

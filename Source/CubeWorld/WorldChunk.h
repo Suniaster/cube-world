@@ -41,7 +41,8 @@ public:
 		int32 InOctaves,
 		float InPersistence,
 		float InLacunarity,
-		float InSeed);
+		float InSeed,
+		UMaterialInterface* InMaterial);
 
 	/** Returns the chunk coordinate this chunk was generated for. */
 	FIntPoint GetChunkCoord() const { return ChunkCoord; }
