@@ -14,6 +14,7 @@ Steps to creating the game:
     - Chunk-based procedural terrain with Perlin noise (Done)
     - Height-based cube-world colorization (Done)
     - ChunkWorldManager for dynamic loading/unloading (Done)
+    - Player starts above origin to avoid terrain clipping (Done)
     - Have the world have a nonflat shape (Done)
     - Optimize for more chunk rendering 
     - Add some montains

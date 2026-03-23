@@ -16,4 +16,7 @@ class CUBEWORLD_API ATestGameMode : public AGameModeBase
 	
 public:
 	ATestGameMode();
+
+protected:
+	virtual void BeginPlay() override;
 };
