@@ -1,13 +1,11 @@
 - Features:
     - Openworld
-    - Simple crafting
-    - Gathering
-    - Variety of enemies
+    - Coop
     - Progression through bosses
+    - Variety of enemies
     - ARPG format Equipments
     - Market
     - Seasonal Leagues
-    - Coop
     - No riged class system
     - Dinamic magic system [See `magic_system.md` for details]
 - Archetypes:

@@ -2,6 +2,8 @@
 #include "VoxelTerrainNoise.h"
 #include "ProceduralMeshComponent.h"
 #include "Materials/Material.h"
+#include "Voxel/VoxelTypes.h"
+#include "Voxel/VoxelMeshGenerator.h"
 
 #if WITH_EDITOR
 #include "Materials/MaterialExpressionVertexColor.h"
@@ -37,99 +39,6 @@ FColor AWorldChunk::GetVoxelColor(float WorldX, float WorldY)
 	return Result.ToFColor(true);
 }
 
-// ── Cube geometry helper ────────────────────────────────────────────────────
-
-void AWorldChunk::AddCube(
-	FVector Position,
-	float Size,
-	const TArray<TArray<int32>>& HeightMap,
-	int32 LocalX, int32 LocalY, int32 Z,
-	int32 ChunkSizeVal,
-	FColor CubeColor,
-	TArray<FVector>& Vertices,
-	TArray<int32>& Triangles,
-	TArray<FVector>& Normals,
-	TArray<FColor>& VertexColors)
-{
-	// Helper: check if a neighbor voxel is solid (blocks face rendering)
-	auto IsSolid = [&](int32 NX, int32 NY, int32 NZ) -> bool
-	{
-		if (NZ < 0) return true; // below ground = solid
-		if (NX < 0 || NX >= ChunkSizeVal || NY < 0 || NY >= ChunkSizeVal)
-			return false; // chunk border = treat as air (could cross-check, but OK for now)
-		return NZ < HeightMap[NX][NY];
-	};
-
-	// The 8 corners of a cube
-	FVector V[8] = {
-		Position + FVector(0,    0,    0),      // 0 - bottom-left-front
-		Position + FVector(Size, 0,    0),      // 1 - bottom-right-front
-		Position + FVector(Size, Size, 0),      // 2 - bottom-right-back
-		Position + FVector(0,    Size, 0),      // 3 - bottom-left-back
-		Position + FVector(0,    0,    Size),   // 4 - top-left-front
-		Position + FVector(Size, 0,    Size),   // 5 - top-right-front
-		Position + FVector(Size, Size, Size),   // 6 - top-right-back
-		Position + FVector(0,    Size, Size),   // 7 - top-left-back
-	};
-
-	// Each face: 4 verts, 2 triangles, 1 normal
-	struct FaceData { int32 I[4]; FVector Normal; };
-
-	FaceData Faces[6] = {
-		// Top    (+Z)
-		{{4, 5, 6, 7}, FVector(0, 0, 1)},
-		// Bottom (-Z)
-		{{3, 2, 1, 0}, FVector(0, 0, -1)},
-		// Front  (-Y)
-		{{0, 1, 5, 4}, FVector(0, -1, 0)},
-		// Back   (+Y)
-		{{2, 3, 7, 6}, FVector(0, 1, 0)},
-		// Left   (-X)
-		{{3, 0, 4, 7}, FVector(-1, 0, 0)},
-		// Right  (+X)
-		{{1, 2, 6, 5}, FVector(1, 0, 0)},
-	};
-
-	// Neighbor offsets per face (dx, dy, dz)
-	int32 NeighborOff[6][3] = {
-		{ 0,  0,  1}, // Top
-		{ 0,  0, -1}, // Bottom
-		{ 0, -1,  0}, // Front
-		{ 0,  1,  0}, // Back
-		{-1,  0,  0}, // Left
-		{ 1,  0,  0}, // Right
-	};
-
-	for (int32 F = 0; F < 6; ++F)
-	{
-		int32 NX = LocalX + NeighborOff[F][0];
-		int32 NY = LocalY + NeighborOff[F][1];
-		int32 NZ = Z      + NeighborOff[F][2];
-
-		// Skip this face if the neighbor voxel is solid (hidden face)
-		if (IsSolid(NX, NY, NZ))
-			continue;
-
-		int32 BaseIdx = Vertices.Num();
-
-		for (int32 C = 0; C < 4; ++C)
-		{
-			Vertices.Add(V[Faces[F].I[C]]);
-			Normals.Add(Faces[F].Normal);
-			VertexColors.Add(CubeColor);
-		}
-
-		// Two triangles for the quad (clockwise winding for UE/DirectX)
-		Triangles.Add(BaseIdx + 0);
-		Triangles.Add(BaseIdx + 2);
-		Triangles.Add(BaseIdx + 1);
-
-		Triangles.Add(BaseIdx + 0);
-		Triangles.Add(BaseIdx + 3);
-		Triangles.Add(BaseIdx + 2);
-	}
-}
-
 // ── Chunk generation ────────────────────────────────────────────────────────
 
 void AWorldChunk::GenerateChunk(
@@ -151,9 +60,10 @@ void AWorldChunk::GenerateChunk(
 	float ChunkWorldY = static_cast<float>(InChunkCoord.Y) * InChunkSize * InVoxelSize;
 	SetActorLocation(FVector(ChunkWorldX, ChunkWorldY, 0.0f));
 
-	// Build height map for this chunk
+	// 1. Build height map and find max height
 	TArray<TArray<int32>> HeightMap;
 	HeightMap.SetNum(InChunkSize);
+	int32 MaxHeight = 0;
 
 	for (int32 X = 0; X < InChunkSize; ++X)
 	{
@@ -168,59 +78,44 @@ void AWorldChunk::GenerateChunk(
 				InFrequency, InAmplitude, InOctaves,
 				InPersistence, InLacunarity, InSeed);
 			HeightMap[X][Y] = H;
+			MaxHeight = FMath::Max(MaxHeight, H);
 		}
 	}
 
-	// Build mesh arrays
-	TArray<FVector> Vertices;
-	TArray<int32> Triangles;
-	TArray<FVector> Normals;
-	TArray<FColor> VertexColors;
+	// 2. Build Voxel Grid
+	FVoxelGrid3D Grid(InChunkSize, InChunkSize, MaxHeight);
 
 	for (int32 X = 0; X < InChunkSize; ++X)
 	{
 		for (int32 Y = 0; Y < InChunkSize; ++Y)
 		{
 			int32 ColumnHeight = HeightMap[X][Y];
-
 			for (int32 Z = 0; Z < ColumnHeight; ++Z)
 			{
-				FVector CubePos(X * InVoxelSize, Y * InVoxelSize, Z * InVoxelSize);
-
 				float WorldX = ChunkWorldX + X * InVoxelSize;
 				float WorldY = ChunkWorldY + Y * InVoxelSize;
 				FColor Color = GetVoxelColor(WorldX, WorldY);
 
-				AddCube(
-					CubePos, InVoxelSize,
-					HeightMap,
-					X, Y, Z,
-					InChunkSize,
-					Color,
-					Vertices, Triangles, Normals, VertexColors);
+				Grid.SetVoxel(X, Y, Z, true, Color);
 			}
 		}
 	}
 
-	// Convert FColor array to FLinearColor for procedural mesh
-	TArray<FLinearColor> LinearVertexColors;
-	LinearVertexColors.Reserve(VertexColors.Num());
-	for (const FColor& C : VertexColors)
-	{
-		LinearVertexColors.Add(FLinearColor(C));
-	}
+	// 3. Generate Mesh
+	FVoxelMeshData MeshData;
+	UVoxelMeshGenerator::GenerateMeshFromGrid(Grid, InVoxelSize, MeshData);
 
-	// Create the procedural mesh section
+	// 4. Create the procedural mesh section
 	TArray<FVector2D> EmptyUVs;
 	TArray<FProcMeshTangent> EmptyTangents;
 
 	TerrainMesh->CreateMeshSection_LinearColor(
 		0,           // Section index
-		Vertices,
-		Triangles,
-		Normals,
+		MeshData.Vertices,
+		MeshData.Triangles,
+		MeshData.Normals,
 		EmptyUVs,
-		LinearVertexColors,
+		MeshData.Colors,
 		EmptyTangents,
 		true);       // Create collision
 

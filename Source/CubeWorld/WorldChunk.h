@@ -54,19 +54,6 @@ protected:
 private:
 	FIntPoint ChunkCoord;
 
-	/** Add the 6 faces of a single cube to the mesh arrays. Skips faces adjacent to solid neighbors. */
-	void AddCube(
-		FVector Position,
-		float Size,
-		const TArray<TArray<int32>>& HeightMap,
-		int32 LocalX, int32 LocalY, int32 Z,
-		int32 ChunkSizeVal,
-		FColor CubeColor,
-		TArray<FVector>& Vertices,
-		TArray<int32>& Triangles,
-		TArray<FVector>& Normals,
-		TArray<FColor>& VertexColors);
-
 	/** Returns a color using smooth noise-based variation across the terrain. */
 	static FColor GetVoxelColor(float WorldX, float WorldY);
 };
