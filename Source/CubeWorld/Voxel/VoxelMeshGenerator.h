@@ -50,12 +50,4 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Voxel")
 	static void GenerateMeshFromGrid(const FVoxelGrid3D& Grid, float VoxelSize, FVoxelMeshData& OutMeshData);
-
-private:
-	/** Adds a cube at the given grid position, culling hidden faces. */
-	static void AddCube(
-		const FVoxelGrid3D& Grid,
-		int32 X, int32 Y, int32 Z,
-		float VoxelSize,
-		FVoxelMeshData& MeshData);
 };
