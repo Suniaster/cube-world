@@ -1,4 +1,6 @@
-#include "VoxelMeshGenerator.h"
+#include "VoxelObject.h"
+#include "ProceduralMeshComponent.h"
+#include "GameFramework/Actor.h"
 
 struct FGreedyQuad
 {
@@ -60,9 +62,19 @@ static TArray<FGreedyQuad> GreedyMeshBinaryPlane(TArray<uint64>& Data, int32 Pla
 	return GreedyQuads;
 }
 
-void UVoxelMeshGenerator::GenerateMeshFromGrid(const FVoxelGrid3D& Grid, float VoxelSize, FVoxelMeshData& OutMeshData)
+UVoxelObject::UVoxelObject()
+	: MeshComponent(nullptr)
 {
-	OutMeshData.Clear();
+}
+
+void UVoxelObject::Build(const FVoxelGrid3D& Grid, float VoxelSize)
+{
+	GenerateMeshFromGrid(Grid, VoxelSize);
+}
+
+void UVoxelObject::GenerateMeshFromGrid(const FVoxelGrid3D& Grid, float VoxelSize)
+{
+	MeshData.Clear();
 
 	const FIntVector GridSize = Grid.Size;
 	if (GridSize.X <= 0 || GridSize.Y <= 0 || GridSize.Z <= 0) return;
@@ -97,7 +109,6 @@ void UVoxelMeshGenerator::GenerateMeshFromGrid(const FVoxelGrid3D& Grid, float V
 	}
 
 	// 2. Face Culling
-	// For each 3 axis, there are 2 directions (positive and negative)
 	TArray<uint64> ColFaceMasks[3][2];
 	ColFaceMasks[AXIS_Z][0].SetNumZeroed(AxisSizes[AXIS_Z]);
 	ColFaceMasks[AXIS_Z][1].SetNumZeroed(AxisSizes[AXIS_Z]);
@@ -124,9 +135,6 @@ void UVoxelMeshGenerator::GenerateMeshFromGrid(const FVoxelGrid3D& Grid, float V
 		int32 Axis = FaceIdx / 2;
 		int32 Direction = FaceIdx % 2;
 
-		// For the Axis0 (Z), Dim1 is X, Dim2 is Y
-		// For the Axis1 (X), Dim1 is Y, Dim2 is Z
-		// For the Axis2 (Y), Dim1 is Z, Dim2 is X
 		int32 Dim1Size = (Axis == AXIS_Z ? GridSize.X : (Axis == AXIS_X ? GridSize.Y : GridSize.Z));
 		int32 Dim2Size = (Axis == AXIS_Z ? GridSize.Y : (Axis == AXIS_X ? GridSize.Z : GridSize.X));
 
@@ -197,36 +205,34 @@ void UVoxelMeshGenerator::GenerateMeshFromGrid(const FVoxelGrid3D& Grid, float V
 		};
 		Normal = Normals[FaceIdx];
 
-		int32 BaseIdx = OutMeshData.Vertices.Num();
+		int32 BaseIdx = MeshData.Vertices.Num();
 		for (int32 i = 0; i < 4; ++i)
 		{
-			OutMeshData.Vertices.Add(Verts[i]);
-			OutMeshData.Normals.Add(Normal);
-			OutMeshData.Colors.Add(FLinearColor(BaseColor));
+			MeshData.Vertices.Add(Verts[i]);
+			MeshData.Normals.Add(Normal);
+			MeshData.Colors.Add(FLinearColor(BaseColor));
 		}
 
-		// Triangles (Clockwise winding for all faces as seen from outside)
-		if (FaceIdx % 2 == 0) // Negative faces (Z-, X-, Y-)
+		if (FaceIdx % 2 == 0) // Negative faces
 		{
-			OutMeshData.Triangles.Add(BaseIdx + 0);
-			OutMeshData.Triangles.Add(BaseIdx + 1);
-			OutMeshData.Triangles.Add(BaseIdx + 2);
-			OutMeshData.Triangles.Add(BaseIdx + 0);
-			OutMeshData.Triangles.Add(BaseIdx + 2);
-			OutMeshData.Triangles.Add(BaseIdx + 3);
+			MeshData.Triangles.Add(BaseIdx + 0);
+			MeshData.Triangles.Add(BaseIdx + 1);
+			MeshData.Triangles.Add(BaseIdx + 2);
+			MeshData.Triangles.Add(BaseIdx + 0);
+			MeshData.Triangles.Add(BaseIdx + 2);
+			MeshData.Triangles.Add(BaseIdx + 3);
 		}
-		else // Positive faces (Z+, X+, Y+)
+		else // Positive faces
 		{
-			OutMeshData.Triangles.Add(BaseIdx + 0);
-			OutMeshData.Triangles.Add(BaseIdx + 2);
-			OutMeshData.Triangles.Add(BaseIdx + 1);
-			OutMeshData.Triangles.Add(BaseIdx + 0);
-			OutMeshData.Triangles.Add(BaseIdx + 3);
-			OutMeshData.Triangles.Add(BaseIdx + 2);
+			MeshData.Triangles.Add(BaseIdx + 0);
+			MeshData.Triangles.Add(BaseIdx + 2);
+			MeshData.Triangles.Add(BaseIdx + 1);
+			MeshData.Triangles.Add(BaseIdx + 0);
+			MeshData.Triangles.Add(BaseIdx + 3);
+			MeshData.Triangles.Add(BaseIdx + 2);
 		}
 	};
 
-	// Final Greedy Pass
 	for (int32 FaceIdx = 0; FaceIdx < 6; ++FaceIdx)
 	{
 		for (auto& ColorGroup : PlaneGroups[FaceIdx])
@@ -248,4 +254,47 @@ void UVoxelMeshGenerator::GenerateMeshFromGrid(const FVoxelGrid3D& Grid, float V
 			}
 		}
 	}
+}
+
+UProceduralMeshComponent* UVoxelObject::Spawn(AActor* Owner, UMaterialInterface* Material)
+{
+	if (!Owner) return nullptr;
+
+	if (!MeshComponent)
+	{
+		MeshComponent = NewObject<UProceduralMeshComponent>(Owner);
+		MeshComponent->RegisterComponent();
+		
+		USceneComponent* Root = Owner->GetRootComponent();
+		if (Root)
+		{
+			MeshComponent->AttachToComponent(Root, FAttachmentTransformRules::KeepRelativeTransform);
+		}
+		else
+		{
+			Owner->SetRootComponent(MeshComponent);
+		}
+		
+		MeshComponent->bUseComplexAsSimpleCollision = true;
+	}
+
+	TArray<FVector2D> EmptyUVs;
+	TArray<FProcMeshTangent> EmptyTangents;
+
+	MeshComponent->CreateMeshSection_LinearColor(
+		0,
+		MeshData.Vertices,
+		MeshData.Triangles,
+		MeshData.Normals,
+		EmptyUVs,
+		MeshData.Colors,
+		EmptyTangents,
+		true);
+
+	if (Material)
+	{
+		MeshComponent->SetMaterial(0, Material);
+	}
+
+	return MeshComponent;
 }

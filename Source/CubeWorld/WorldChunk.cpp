@@ -1,9 +1,8 @@
 #include "WorldChunk.h"
 #include "VoxelTerrainNoise.h"
-#include "ProceduralMeshComponent.h"
+#include "Voxel/VoxelObject.h"
 #include "Materials/Material.h"
 #include "Voxel/VoxelTypes.h"
-#include "Voxel/VoxelMeshGenerator.h"
 
 #if WITH_EDITOR
 #include "Materials/MaterialExpressionVertexColor.h"
@@ -13,11 +12,8 @@ AWorldChunk::AWorldChunk()
 {
 	PrimaryActorTick.bCanEverTick = false;
 
-	TerrainMesh = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("TerrainMesh"));
-	RootComponent = TerrainMesh;
-
-	// Enable collision so characters can walk on the terrain
-	TerrainMesh->bUseComplexAsSimpleCollision = true;
+	USceneComponent* Root = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+	SetRootComponent(Root);
 }
 
 // ── Color helper ────────────────────────────────────────────────────────────
@@ -101,26 +97,13 @@ void AWorldChunk::GenerateChunk(
 		}
 	}
 
-	// 3. Generate Mesh
-	FVoxelMeshData MeshData;
-	UVoxelMeshGenerator::GenerateMeshFromGrid(Grid, InVoxelSize, MeshData);
-
-	// 4. Create the procedural mesh section
-	TArray<FVector2D> EmptyUVs;
-	TArray<FProcMeshTangent> EmptyTangents;
-
-	TerrainMesh->CreateMeshSection_LinearColor(
-		0,           // Section index
-		MeshData.Vertices,
-		MeshData.Triangles,
-		MeshData.Normals,
-		EmptyUVs,
-		MeshData.Colors,
-		EmptyTangents,
-		true);       // Create collision
-
-	if (InMaterial)
+	// 3. Create and build the voxel object
+	if (!VoxelObject)
 	{
-		TerrainMesh->SetMaterial(0, InMaterial);
+		VoxelObject = NewObject<UVoxelObject>(this);
 	}
+	VoxelObject->Build(Grid, InVoxelSize);
+
+	// 4. Spawn the mesh representation
+	VoxelObject->Spawn(this, InMaterial);
 }

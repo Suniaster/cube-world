@@ -22,7 +22,7 @@ void ATestGameMode::BeginPlay()
 		{
 			// Start the player a bit above the world origin (0,0,0)
 			// This ensures they are above any potential terrain at the start.
-			PlayerPawn->SetActorLocation(FVector(0.0f, 0.0f, 500.0f));
+			PlayerPawn->SetActorLocation(FVector(0.0f, 0.0f, 5000.0f));
 		}
 	}
 }

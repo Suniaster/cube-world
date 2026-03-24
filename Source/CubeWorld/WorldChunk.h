@@ -4,7 +4,7 @@
 #include "GameFramework/Actor.h"
 #include "WorldChunk.generated.h"
 
-class UProceduralMeshComponent;
+class UVoxelObject;
 
 /**
  * Represents a single chunk of voxel terrain.
@@ -48,8 +48,8 @@ public:
 	FIntPoint GetChunkCoord() const { return ChunkCoord; }
 
 protected:
-	UPROPERTY(VisibleAnywhere)
-	UProceduralMeshComponent* TerrainMesh;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Voxel")
+	UVoxelObject* VoxelObject;
 
 private:
 	FIntPoint ChunkCoord;
