@@ -1,9 +1,9 @@
 #include "WorldChunk.h"
 #include "VoxelTerrainNoise.h"
-#include "Voxel/VoxelObject.h"
+#include "../VoxelObject.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
-#include "Voxel/VoxelTypes.h"
+#include "../VoxelTypes.h"
 
 #if WITH_EDITOR
 #include "Materials/MaterialExpressionVertexColor.h"
