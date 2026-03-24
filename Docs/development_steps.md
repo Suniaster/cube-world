@@ -16,7 +16,8 @@ Steps to creating the game:
     - ChunkWorldManager for dynamic loading/unloading (Done)
     - Player starts above origin to avoid terrain clipping (Done)
     - Have the world have a nonflat shape (Done)
-    - Optimize for more chunk rendering 
+    - Optimize for more chunk rendering (Done)
+        - Implemented and fixed greedy meshing algorithm
     - Add some montains
     - Add props to make the world more vivid (trees)
     - Ensure the artstyle in the world make sense (colors, terrain shape, tree shapes)

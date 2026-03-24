@@ -36,7 +36,7 @@ FColor AWorldChunk::GetVoxelColor(float WorldX, float WorldY)
 	FLinearColor LightGreen(0.22f, 0.40f, 0.14f);
 
 	FLinearColor Result = FMath::Lerp(DarkGreen, LightGreen, T);
-	return Result.ToFColor(true);
+	return DarkGreen.ToFColor(true);
 }
 
 // ── Chunk generation ────────────────────────────────────────────────────────

@@ -14,7 +14,7 @@ static TArray<FGreedyQuad> GreedyMeshBinaryPlane(TArray<uint64>& Data, int32 Pla
 		while (Y < PlaneHeight)
 		{
 			// Find first solid bit
-			uint64 Bits = Data[Row] >> Y;
+			uint64 Bits = (Y < 64) ? (Data[Row] >> Y) : 0;
 			if (Bits == 0)
 			{
 				Y = PlaneHeight;
@@ -28,22 +28,22 @@ static TArray<FGreedyQuad> GreedyMeshBinaryPlane(TArray<uint64>& Data, int32 Pla
 			if (Y >= PlaneHeight) break;
 
 			// Count consecutive ones
-			uint64 RemainingBits = Data[Row] >> Y;
 			int32 H = 0;
-			uint64 TempBits = RemainingBits;
+			uint64 TempBits = Data[Row] >> Y;
 			while (TempBits & 1)
 			{
 				H++;
 				TempBits >>= 1;
 				if (Y + H >= PlaneHeight) break;
+				if (Y + H >= 64) break; // uint64 limit
 			}
 
-			uint64 HAsMask = (1ULL << H) - 1;
+			uint64 HAsMask = (H == 64) ? ~0ULL : ((1ULL << H) - 1);
 			uint64 Mask = HAsMask << Y;
 
 			// Grow horizontally
 			int32 W = 1;
-			while (Row + W < Data.Num() && Row + W < PlaneHeight)
+			while (Row + W < Data.Num())
 			{
 				uint64 NextRowH = (Data[Row + W] >> Y) & HAsMask;
 				if (NextRowH != HAsMask) break;
@@ -67,45 +67,48 @@ void UVoxelMeshGenerator::GenerateMeshFromGrid(const FVoxelGrid3D& Grid, float V
 	const FIntVector GridSize = Grid.Size;
 	if (GridSize.X <= 0 || GridSize.Y <= 0 || GridSize.Z <= 0) return;
 
-	// Limit to uint64's capacity (64 bits). 
-	const int32 MaxBitSize = 64;
-	FIntVector ClampedSize(FMath::Min(GridSize.X, MaxBitSize), FMath::Min(GridSize.Y, MaxBitSize), FMath::Min(GridSize.Z, MaxBitSize));
-
 	// 1. Column Mask Generation
 	TArray<uint64> AxisCols[3];
-	AxisCols[0].SetNumZeroed(ClampedSize.X * ClampedSize.Y);
-	AxisCols[1].SetNumZeroed(ClampedSize.Y * ClampedSize.Z);
-	AxisCols[2].SetNumZeroed(ClampedSize.Z * ClampedSize.X);
+	const uint64 AXIS_Z = 0;
+	const uint64 AXIS_X = 1;
+	const uint64 AXIS_Y = 2;
+	TArray<uint64> AxisSizes;
+	AxisSizes.Add(GridSize.X * GridSize.Y); // Z axis 
+	AxisSizes.Add(GridSize.Y * GridSize.Z); // X axis 
+	AxisSizes.Add(GridSize.Z * GridSize.X); // Y axis 
+	AxisCols[AXIS_Z].SetNumZeroed(AxisSizes[AXIS_Z]);
+	AxisCols[AXIS_X].SetNumZeroed(AxisSizes[AXIS_X]);
+	AxisCols[AXIS_Y].SetNumZeroed(AxisSizes[AXIS_Y]);
 
-	for (int32 Z = 0; Z < ClampedSize.Z; ++Z)
+	for (uint64 Z = 0; Z < GridSize.Z; ++Z)
 	{
-		for (int32 Y = 0; Y < ClampedSize.Y; ++Y)
+		for (uint64 Y = 0; Y < GridSize.Y; ++Y)
 		{
-			for (int32 X = 0; X < ClampedSize.X; ++X)
+			for (uint64 X = 0; X < GridSize.X; ++X)
 			{
 				if (Grid.GetVoxel(X, Y, Z))
 				{
-					AxisCols[0][X + Y * ClampedSize.X] |= (1ULL << Z);
-					AxisCols[1][Y + Z * ClampedSize.Y] |= (1ULL << X);
-					AxisCols[2][Z + X * ClampedSize.Z] |= (1ULL << Y);
+					AxisCols[AXIS_Z][X + Y * GridSize.X] |= (1ULL << Z);
+					AxisCols[AXIS_X][Y + Z * GridSize.Y] |= (1ULL << X);
+					AxisCols[AXIS_Y][Z + X * GridSize.Z] |= (1ULL << Y);
 				}
 			}
 		}
 	}
 
 	// 2. Face Culling
+	// For each 3 axis, there are 2 directions (positive and negative)
 	TArray<uint64> ColFaceMasks[3][2];
-	ColFaceMasks[0][0].SetNumZeroed(ClampedSize.X * ClampedSize.Y);
-	ColFaceMasks[0][1].SetNumZeroed(ClampedSize.X * ClampedSize.Y);
-	ColFaceMasks[1][0].SetNumZeroed(ClampedSize.Y * ClampedSize.Z);
-	ColFaceMasks[1][1].SetNumZeroed(ClampedSize.Y * ClampedSize.Z);
-	ColFaceMasks[2][0].SetNumZeroed(ClampedSize.Z * ClampedSize.X);
-	ColFaceMasks[2][1].SetNumZeroed(ClampedSize.Z * ClampedSize.X);
+	ColFaceMasks[AXIS_Z][0].SetNumZeroed(AxisSizes[AXIS_Z]);
+	ColFaceMasks[AXIS_Z][1].SetNumZeroed(AxisSizes[AXIS_Z]);
+	ColFaceMasks[AXIS_X][0].SetNumZeroed(AxisSizes[AXIS_X]);
+	ColFaceMasks[AXIS_X][1].SetNumZeroed(AxisSizes[AXIS_X]);
+	ColFaceMasks[AXIS_Y][0].SetNumZeroed(AxisSizes[AXIS_Y]);
+	ColFaceMasks[AXIS_Y][1].SetNumZeroed(AxisSizes[AXIS_Y]);
 
 	for (int32 Axis = 0; Axis < 3; ++Axis)
 	{
-		int32 ColCount = (Axis == 0 ? ClampedSize.X * ClampedSize.Y : (Axis == 1 ? ClampedSize.Y * ClampedSize.Z : ClampedSize.Z * ClampedSize.X));
-		for (int32 i = 0; i < ColCount; ++i)
+		for (int32 i = 0; i < AxisSizes[Axis]; ++i)
 		{
 			uint64 Col = AxisCols[Axis][i];
 			ColFaceMasks[Axis][0][i] = Col & ~(Col << 1); // Negative side faces
@@ -121,11 +124,11 @@ void UVoxelMeshGenerator::GenerateMeshFromGrid(const FVoxelGrid3D& Grid, float V
 		int32 Axis = FaceIdx / 2;
 		int32 Direction = FaceIdx % 2;
 
-		int32 Dim1Index = (Axis == 0 ? 0 : (Axis == 1 ? 1 : 2));
-		int32 Dim2Index = (Axis == 0 ? 1 : (Axis == 1 ? 2 : 0));
-		int32 Dim1Size = ClampedSize[Dim1Index];
-		int32 Dim2Size = ClampedSize[Dim2Index];
-		int32 AxisSize = ClampedSize[Axis];
+		// For the Axis0 (Z), Dim1 is X, Dim2 is Y
+		// For the Axis1 (X), Dim1 is Y, Dim2 is Z
+		// For the Axis2 (Y), Dim1 is Z, Dim2 is X
+		int32 Dim1Size = (Axis == AXIS_Z ? GridSize.X : (Axis == AXIS_X ? GridSize.Y : GridSize.Z));
+		int32 Dim2Size = (Axis == AXIS_Z ? GridSize.Y : (Axis == AXIS_X ? GridSize.Z : GridSize.X));
 
 		for (int32 V2 = 0; V2 < Dim2Size; ++V2)
 		{
@@ -203,12 +206,24 @@ void UVoxelMeshGenerator::GenerateMeshFromGrid(const FVoxelGrid3D& Grid, float V
 		}
 
 		// Triangles (Clockwise winding for all faces as seen from outside)
-		OutMeshData.Triangles.Add(BaseIdx + 0);
-		OutMeshData.Triangles.Add(BaseIdx + 2);
-		OutMeshData.Triangles.Add(BaseIdx + 1);
-		OutMeshData.Triangles.Add(BaseIdx + 0);
-		OutMeshData.Triangles.Add(BaseIdx + 3);
-		OutMeshData.Triangles.Add(BaseIdx + 2);
+		if (FaceIdx % 2 == 0) // Negative faces (Z-, X-, Y-)
+		{
+			OutMeshData.Triangles.Add(BaseIdx + 0);
+			OutMeshData.Triangles.Add(BaseIdx + 1);
+			OutMeshData.Triangles.Add(BaseIdx + 2);
+			OutMeshData.Triangles.Add(BaseIdx + 0);
+			OutMeshData.Triangles.Add(BaseIdx + 2);
+			OutMeshData.Triangles.Add(BaseIdx + 3);
+		}
+		else // Positive faces (Z+, X+, Y+)
+		{
+			OutMeshData.Triangles.Add(BaseIdx + 0);
+			OutMeshData.Triangles.Add(BaseIdx + 2);
+			OutMeshData.Triangles.Add(BaseIdx + 1);
+			OutMeshData.Triangles.Add(BaseIdx + 0);
+			OutMeshData.Triangles.Add(BaseIdx + 3);
+			OutMeshData.Triangles.Add(BaseIdx + 2);
+		}
 	};
 
 	// Final Greedy Pass
@@ -222,8 +237,8 @@ void UVoxelMeshGenerator::GenerateMeshFromGrid(const FVoxelGrid3D& Grid, float V
 				int32 PosOnAxis = PosGroup.Key;
 				TArray<uint64>& Plane = PosGroup.Value;
 				
-				int32 Dim2Index = (FaceIdx / 2 == 0 ? 1 : (FaceIdx / 2 == 1 ? 2 : 0));
-				int32 PlaneHeight = ClampedSize[Dim2Index];
+				const uint32 Axis = FaceIdx / 2;
+				int32 PlaneHeight = (Axis == AXIS_Z ? GridSize.Y : (Axis == AXIS_X ? GridSize.Z : GridSize.X));
 
 				TArray<FGreedyQuad> Quads = GreedyMeshBinaryPlane(Plane, PlaneHeight);
 				for (const FGreedyQuad& Quad : Quads)

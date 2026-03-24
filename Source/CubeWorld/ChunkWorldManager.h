@@ -27,7 +27,7 @@ protected:
 
 	/** Number of voxel columns per chunk side (e.g. 16 = 16x16 grid). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Chunks")
-	int32 ChunkSize = 16;
+	int32 ChunkSize = 32;
 
 	/** World-space size of one cube in UU. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Chunks")
