@@ -156,9 +156,7 @@ void UVoxelObject::GenerateMeshFromGrid(const FVoxelGrid3D& Grid, float VoxelSiz
 
 					uint32 ColorHash = 0;
 					{
-						FColor VoxelColor = (Grid.VoxelColors.Num() == Grid.Grid.Num()) 
-							? Grid.GetVoxelColor(VoxelPos.X, VoxelPos.Y, VoxelPos.Z) 
-							: Grid.FaceColors[FaceIdx];
+						FColor VoxelColor = Grid.GetVoxelColor(VoxelPos.X, VoxelPos.Y, VoxelPos.Z);
 						ColorHash = (uint32(VoxelColor.R) << 24) | (uint32(VoxelColor.G) << 16) | (uint32(VoxelColor.B) << 8) | uint32(VoxelColor.A);
 					}
 
