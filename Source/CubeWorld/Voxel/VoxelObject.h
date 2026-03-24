@@ -46,7 +46,10 @@ class CUBEWORLD_API UVoxelObject : public UObject
 public:
 	UVoxelObject();
 
-	/** Generates and stores mesh data from a voxel grid. */
+	/** Generates and stores mesh data from a voxel grid with optional vertex coloring. */
+	void Build(const FVoxelGrid3D& Grid, float VoxelSize);
+
+	/** Generates and stores mesh data from a voxel grid with a custom vertex coloring callback. */
 	void Build(const FVoxelGrid3D& Grid, float VoxelSize, TFunctionRef<FColor(uint8 BlockType, const FVector& Pos, const FVector& Normal)> ColorFunc);
 
 	/** Spawns or updates a procedural mesh component on the target actor. */
@@ -64,5 +67,5 @@ private:
 	UProceduralMeshComponent* MeshComponent;
 
 	/** Internal mesh generation logic ported from VoxelMeshGenerator */
-	void GenerateMeshFromGrid(const FVoxelGrid3D& Grid, float VoxelSize, TFunctionRef<FColor(uint8 BlockType, const FVector& Pos, const FVector& Normal)> ColorFunc);
+	void GenerateMeshFromGrid(const FVoxelGrid3D& Grid, float VoxelSize, TFunctionRef<FColor(uint8 BlockType, const FVector& Pos, const FVector& Normal)>* ColorFunc);
 };

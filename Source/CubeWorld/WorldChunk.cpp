@@ -2,6 +2,7 @@
 #include "VoxelTerrainNoise.h"
 #include "Voxel/VoxelObject.h"
 #include "Materials/Material.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Voxel/VoxelTypes.h"
 
 #if WITH_EDITOR
@@ -14,25 +15,6 @@ AWorldChunk::AWorldChunk()
 
 	USceneComponent* Root = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
 	SetRootComponent(Root);
-}
-
-// ── Color helper ────────────────────────────────────────────────────────────
-
-FColor AWorldChunk::GetVoxelColor(float WorldX, float WorldY)
-{
-	// Use low-frequency Perlin noise for smooth, flowing color variation
-	// across the entire terrain — no per-block boundaries
-	float ColorNoise = FMath::PerlinNoise2D(FVector2D(WorldX * 0.0008f, WorldY * 0.0008f));
-	// Map from [-1,1] to [0,1]
-	float T = ColorNoise * 0.5f + 0.5f;
-
-	// Blend between two muted greens — subtle, smooth variation
-	// Values higher here because lit material naturally darkens with light angle
-	FLinearColor DarkGreen(0.15f, 0.30f, 0.10f);
-	FLinearColor LightGreen(0.22f, 0.40f, 0.14f);
-
-	FLinearColor Result = FMath::Lerp(DarkGreen, LightGreen, T);
-	return DarkGreen.ToFColor(true);
 }
 
 // ── Chunk generation ────────────────────────────────────────────────────────
@@ -99,10 +81,19 @@ void AWorldChunk::GenerateChunk(
 		VoxelObject = NewObject<UVoxelObject>(this);
 	}
 
-	VoxelObject->Build(Grid, InVoxelSize, [ChunkWorldX, ChunkWorldY](uint8 BlockType, const FVector& Pos, const FVector& Normal) {
-		return GetVoxelColor(Pos.X + ChunkWorldX, Pos.Y + ChunkWorldY);
-	});
+	// USE GENERIC BUILD: No vertex colors requested now, shader will handle it
+	VoxelObject->Build(Grid, InVoxelSize);
 
-	// 4. Spawn the mesh representation
-	VoxelObject->Spawn(this, InMaterial);
+	// 4. Create Dynamic Material and set parameters
+	UMaterialInstanceDynamic* DynMaterial = nullptr;
+	if (InMaterial)
+	{
+		DynMaterial = UMaterialInstanceDynamic::Create(InMaterial, this);
+		// Set some parameters if they exist in the material
+		DynMaterial->SetScalarParameterValue(TEXT("NoiseScale"), 0.0008f);
+		// Note: Seed and other params can be added here if the shader supports them
+	}
+
+	// 5. Spawn the mesh representation
+	VoxelObject->Spawn(this, DynMaterial ? (UMaterialInterface*)DynMaterial : InMaterial);
 }

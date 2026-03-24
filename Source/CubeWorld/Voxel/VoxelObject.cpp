@@ -67,12 +67,17 @@ UVoxelObject::UVoxelObject()
 {
 }
 
-void UVoxelObject::Build(const FVoxelGrid3D& Grid, float VoxelSize, TFunctionRef<FColor(uint8 BlockType, const FVector& Pos, const FVector& Normal)> ColorFunc)
+void UVoxelObject::Build(const FVoxelGrid3D& Grid, float VoxelSize)
 {
-	GenerateMeshFromGrid(Grid, VoxelSize, ColorFunc);
+	GenerateMeshFromGrid(Grid, VoxelSize, nullptr);
 }
 
-void UVoxelObject::GenerateMeshFromGrid(const FVoxelGrid3D& Grid, float VoxelSize, TFunctionRef<FColor(uint8 BlockType, const FVector& Pos, const FVector& Normal)> ColorFunc)
+void UVoxelObject::Build(const FVoxelGrid3D& Grid, float VoxelSize, TFunctionRef<FColor(uint8 BlockType, const FVector& Pos, const FVector& Normal)> ColorFunc)
+{
+	GenerateMeshFromGrid(Grid, VoxelSize, &ColorFunc);
+}
+
+void UVoxelObject::GenerateMeshFromGrid(const FVoxelGrid3D& Grid, float VoxelSize, TFunctionRef<FColor(uint8 BlockType, const FVector& Pos, const FVector& Normal)>* ColorFunc)
 {
 	MeshData.Clear();
 
@@ -197,8 +202,15 @@ void UVoxelObject::GenerateMeshFromGrid(const FVoxelGrid3D& Grid, float VoxelSiz
 		{
 			MeshData.Vertices.Add(Verts[i]);
 			MeshData.Normals.Add(Normal);
-			// Call the color function to get vertex color
-			MeshData.Colors.Add(FLinearColor(ColorFunc(BlockType, Verts[i], Normal)));
+			// Call the color function to get vertex color if provided
+			if (ColorFunc)
+			{
+				MeshData.Colors.Add(FLinearColor((*ColorFunc)(BlockType, Verts[i], Normal)));
+			}
+			else
+			{
+				MeshData.Colors.Add(FLinearColor::White);
+			}
 		}
 
 		if (FaceIdx % 2 == 0) // Negative faces

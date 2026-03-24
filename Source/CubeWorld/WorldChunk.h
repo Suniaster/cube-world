@@ -54,6 +54,4 @@ protected:
 private:
 	FIntPoint ChunkCoord;
 
-	/** Returns a color using smooth noise-based variation across the terrain. */
-	static FColor GetVoxelColor(float WorldX, float WorldY);
 };
