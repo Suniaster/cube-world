@@ -59,6 +59,9 @@ public:
 	/** Returns the stored mesh data. */
 	const FVoxelMeshData& GetMeshData() const { return MeshData; }
 
+	/** Returns the spawned mesh component. */
+	UProceduralMeshComponent* GetMeshComponent() const { return MeshComponent; }
+
 private:
 	UPROPERTY()
 	FVoxelMeshData MeshData;

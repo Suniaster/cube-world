@@ -3,6 +3,7 @@
 #include "../VoxelObject.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "ProceduralMeshComponent.h"
 #include "../VoxelTypes.h"
 
 #if WITH_EDITOR
@@ -84,14 +85,22 @@ void AWorldChunk::GenerateChunk(
 	// USE GENERIC BUILD: No vertex colors requested now, shader will handle it
 	VoxelObject->Build(Grid, InVoxelSize);
 
-	// 4. Create Dynamic Material and set parameters
+	// 4. Create/Update Dynamic Material
 	UMaterialInstanceDynamic* DynMaterial = nullptr;
 	if (InMaterial)
 	{
-		DynMaterial = UMaterialInstanceDynamic::Create(InMaterial, this);
-		// Set some parameters if they exist in the material
+		// Try to reuse existing dynamic material if possible
+		if (VoxelObject->GetMeshComponent())
+		{
+			DynMaterial = Cast<UMaterialInstanceDynamic>(VoxelObject->GetMeshComponent()->GetMaterial(0));
+		}
+		
+		if (!DynMaterial || DynMaterial->Parent != InMaterial)
+		{
+			DynMaterial = UMaterialInstanceDynamic::Create(InMaterial, this);
+		}
+
 		DynMaterial->SetScalarParameterValue(TEXT("NoiseScale"), 0.0008f);
-		// Note: Seed and other params can be added here if the shader supports them
 	}
 
 	// 5. Spawn the mesh representation

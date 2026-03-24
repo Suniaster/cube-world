@@ -291,6 +291,11 @@ UProceduralMeshComponent* UVoxelObject::Spawn(AActor* Owner, UMaterialInterface*
 		EmptyTangents,
 		true);
 
+	// ── MEMORY OPTIMIZATION ──
+	// ProceduralMeshComponent already copied the data. 
+	// Clear our local copy to reclaim memory.
+	MeshData.Clear();
+
 	if (Material)
 	{
 		MeshComponent->SetMaterial(0, Material);

@@ -49,47 +49,47 @@ ABlankChar::ABlankChar() {
   FollowCamera->bUsePawnControlRotation =
       false; // Camera itself does not rotate, the boom does
 
-  // Attach Header statically to the 'head' bone
+  // Attach Header to Mesh (procedurally animated)
   HeadMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("HeadMesh"));
-  HeadMesh->SetupAttachment(GetMesh(), FName("head"));
+  HeadMesh->SetupAttachment(GetMesh());
   static ConstructorHelpers::FObjectFinder<UStaticMesh> HeadAsset(
       TEXT("/Script/Engine.StaticMesh'/Game/BlankChar/Head.Head'"));
   if (HeadAsset.Succeeded())
     HeadMesh->SetStaticMesh(HeadAsset.Object);
 
-  // Attach Torso to the 'spine' bone
+  // Attach Torso to Mesh
   TorsoMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("TorsoMesh"));
-  TorsoMesh->SetupAttachment(GetMesh(), FName("spine"));
+  TorsoMesh->SetupAttachment(GetMesh());
   static ConstructorHelpers::FObjectFinder<UStaticMesh> TorsoAsset(
       TEXT("/Script/Engine.StaticMesh'/Game/BlankChar/Torso.Torso'"));
   if (TorsoAsset.Succeeded())
     TorsoMesh->SetStaticMesh(TorsoAsset.Object);
 
-  // Attach hands
+  // Attach hands to Mesh
   HandLMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("HandLMesh"));
-  HandLMesh->SetupAttachment(GetMesh(), FName("hand_l"));
+  HandLMesh->SetupAttachment(GetMesh());
   static ConstructorHelpers::FObjectFinder<UStaticMesh> HandLAsset(
       TEXT("/Script/Engine.StaticMesh'/Game/BlankChar/Hand_L.Hand_L'"));
   if (HandLAsset.Succeeded())
     HandLMesh->SetStaticMesh(HandLAsset.Object);
 
   HandRMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("HandRMesh"));
-  HandRMesh->SetupAttachment(GetMesh(), FName("hand_r"));
+  HandRMesh->SetupAttachment(GetMesh());
   static ConstructorHelpers::FObjectFinder<UStaticMesh> HandRAsset(
       TEXT("/Script/Engine.StaticMesh'/Game/BlankChar/Hand_R.Hand_R'"));
   if (HandRAsset.Succeeded())
     HandRMesh->SetStaticMesh(HandRAsset.Object);
 
-  // Attach feet (legs)
+  // Attach feet to Mesh
   FootLMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("FootLMesh"));
-  FootLMesh->SetupAttachment(GetMesh(), FName("foot_l"));
+  FootLMesh->SetupAttachment(GetMesh());
   static ConstructorHelpers::FObjectFinder<UStaticMesh> FootLAsset(
       TEXT("/Script/Engine.StaticMesh'/Game/BlankChar/Foot_L.Foot_L'"));
   if (FootLAsset.Succeeded())
     FootLMesh->SetStaticMesh(FootLAsset.Object);
 
   FootRMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("FootRMesh"));
-  FootRMesh->SetupAttachment(GetMesh(), FName("foot_r"));
+  FootRMesh->SetupAttachment(GetMesh());
   static ConstructorHelpers::FObjectFinder<UStaticMesh> FootRAsset(
       TEXT("/Script/Engine.StaticMesh'/Game/BlankChar/Foot_R.Foot_R'"));
   if (FootRAsset.Succeeded())
