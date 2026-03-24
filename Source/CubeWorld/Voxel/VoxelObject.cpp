@@ -67,12 +67,12 @@ UVoxelObject::UVoxelObject()
 {
 }
 
-void UVoxelObject::Build(const FVoxelGrid3D& Grid, float VoxelSize)
+void UVoxelObject::Build(const FVoxelGrid3D& Grid, float VoxelSize, TFunctionRef<FColor(uint8 BlockType, const FVector& Pos, const FVector& Normal)> ColorFunc)
 {
-	GenerateMeshFromGrid(Grid, VoxelSize);
+	GenerateMeshFromGrid(Grid, VoxelSize, ColorFunc);
 }
 
-void UVoxelObject::GenerateMeshFromGrid(const FVoxelGrid3D& Grid, float VoxelSize)
+void UVoxelObject::GenerateMeshFromGrid(const FVoxelGrid3D& Grid, float VoxelSize, TFunctionRef<FColor(uint8 BlockType, const FVector& Pos, const FVector& Normal)> ColorFunc)
 {
 	MeshData.Clear();
 
@@ -98,7 +98,7 @@ void UVoxelObject::GenerateMeshFromGrid(const FVoxelGrid3D& Grid, float VoxelSiz
 		{
 			for (uint64 X = 0; X < GridSize.X; ++X)
 			{
-				if (Grid.GetVoxel(X, Y, Z))
+				if (Grid.GetVoxel(X, Y, Z) != 0) // New: Check for non-zero block type
 				{
 					AxisCols[AXIS_Z][X + Y * GridSize.X] |= (1ULL << Z);
 					AxisCols[AXIS_X][Y + Z * GridSize.Y] |= (1ULL << X);
@@ -128,7 +128,7 @@ void UVoxelObject::GenerateMeshFromGrid(const FVoxelGrid3D& Grid, float VoxelSiz
 	}
 
 	// 3. Greedy Meshing Planes
-	TMap<uint32, TMap<int32, TArray<uint64>>> PlaneGroups[6];
+	TMap<uint8, TMap<int32, TArray<uint64>>> PlaneGroups[6]; // Now maps BlockType -> (AxisPos -> PlaneData)
 
 	for (int32 FaceIdx = 0; FaceIdx < 6; ++FaceIdx)
 	{
@@ -154,13 +154,9 @@ void UVoxelObject::GenerateMeshFromGrid(const FVoxelGrid3D& Grid, float VoxelSiz
 					else if (Axis == 1) VoxelPos = FIntVector(V3, V1, V2);
 					else                VoxelPos = FIntVector(V2, V3, V1);
 
-					uint32 ColorHash = 0;
-					{
-						FColor VoxelColor = Grid.GetVoxelColor(VoxelPos.X, VoxelPos.Y, VoxelPos.Z);
-						ColorHash = (uint32(VoxelColor.R) << 24) | (uint32(VoxelColor.G) << 16) | (uint32(VoxelColor.B) << 8) | uint32(VoxelColor.A);
-					}
-
-					TMap<int32, TArray<uint64>>& Layers = PlaneGroups[FaceIdx].FindOrAdd(ColorHash);
+					uint8 BlockType = Grid.GetVoxel(VoxelPos.X, VoxelPos.Y, VoxelPos.Z);
+					
+					TMap<int32, TArray<uint64>>& Layers = PlaneGroups[FaceIdx].FindOrAdd(BlockType);
 					TArray<uint64>& Plane = Layers.FindOrAdd(V3);
 					if (Plane.Num() == 0) Plane.SetNumZeroed(Dim1Size);
 					Plane[V1] |= (1ULL << V2);
@@ -170,17 +166,9 @@ void UVoxelObject::GenerateMeshFromGrid(const FVoxelGrid3D& Grid, float VoxelSiz
 	}
 
 	// 4. Generate Quads and Add to Mesh
-	auto AddQuad = [&](const FGreedyQuad& Quad, int32 AxisPos, int32 FaceIdx, uint32 ColorHash)
+	auto AddQuad = [&](const FGreedyQuad& Quad, int32 AxisPos, int32 FaceIdx, uint8 BlockType)
 	{
 		int32 Axis = FaceIdx / 2;
-		FColor BaseColor;
-		BaseColor.R = (ColorHash >> 24) & 0xFF;
-		BaseColor.G = (ColorHash >> 16) & 0xFF;
-		BaseColor.B = (ColorHash >> 8) & 0xFF;
-		BaseColor.A = ColorHash & 0xFF;
-
-		FVector Verts[4];
-		FVector Normal;
 		
 		auto GetPos = [&](int32 V1, int32 V2, int32 V3) -> FVector {
 			if (Axis == 0)      return FVector(V1, V2, V3) * VoxelSize;
@@ -191,6 +179,7 @@ void UVoxelObject::GenerateMeshFromGrid(const FVoxelGrid3D& Grid, float VoxelSiz
 		int32 V3 = AxisPos;
 		if (FaceIdx % 2 != 0) V3 += 1; // Offset for positive faces
 
+		FVector Verts[4];
 		Verts[0] = GetPos(Quad.X,          Quad.Y,          V3);
 		Verts[1] = GetPos(Quad.X + Quad.W, Quad.Y,          V3);
 		Verts[2] = GetPos(Quad.X + Quad.W, Quad.Y + Quad.H, V3);
@@ -201,14 +190,15 @@ void UVoxelObject::GenerateMeshFromGrid(const FVoxelGrid3D& Grid, float VoxelSiz
 			FVector(-1, 0, 0), FVector(1, 0, 0),  // X-, X+
 			FVector(0, -1, 0), FVector(0, 1, 0)   // Y-, Y+
 		};
-		Normal = Normals[FaceIdx];
+		FVector Normal = Normals[FaceIdx];
 
 		int32 BaseIdx = MeshData.Vertices.Num();
 		for (int32 i = 0; i < 4; ++i)
 		{
 			MeshData.Vertices.Add(Verts[i]);
 			MeshData.Normals.Add(Normal);
-			MeshData.Colors.Add(FLinearColor(BaseColor));
+			// Call the color function to get vertex color
+			MeshData.Colors.Add(FLinearColor(ColorFunc(BlockType, Verts[i], Normal)));
 		}
 
 		if (FaceIdx % 2 == 0) // Negative faces
@@ -233,10 +223,10 @@ void UVoxelObject::GenerateMeshFromGrid(const FVoxelGrid3D& Grid, float VoxelSiz
 
 	for (int32 FaceIdx = 0; FaceIdx < 6; ++FaceIdx)
 	{
-		for (auto& ColorGroup : PlaneGroups[FaceIdx])
+		for (auto& TypeGroup : PlaneGroups[FaceIdx])
 		{
-			uint32 ColorHash = ColorGroup.Key;
-			for (auto& PosGroup : ColorGroup.Value)
+			uint8 BlockType = TypeGroup.Key;
+			for (auto& PosGroup : TypeGroup.Value)
 			{
 				int32 PosOnAxis = PosGroup.Key;
 				TArray<uint64>& Plane = PosGroup.Value;
@@ -247,7 +237,7 @@ void UVoxelObject::GenerateMeshFromGrid(const FVoxelGrid3D& Grid, float VoxelSiz
 				TArray<FGreedyQuad> Quads = GreedyMeshBinaryPlane(Plane, PlaneHeight);
 				for (const FGreedyQuad& Quad : Quads)
 				{
-					AddQuad(Quad, PosOnAxis, FaceIdx, ColorHash);
+					AddQuad(Quad, PosOnAxis, FaceIdx, BlockType);
 				}
 			}
 		}

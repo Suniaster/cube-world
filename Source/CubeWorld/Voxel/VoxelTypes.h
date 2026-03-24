@@ -12,13 +12,9 @@ struct FVoxelGrid3D
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FIntVector Size;
 
-	/** Voxel existence grid (true = solid, false = air). */
+	/** Voxel type grid (0 = None/Empty). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	TArray<bool> Grid;
-
-	/** Optional: Color for each specific voxel in the grid. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	TArray<FColor> VoxelColors;
+	TArray<uint8> Grid;
 
 	FVoxelGrid3D() : Size(FIntVector(0, 0, 0))
 	{
@@ -27,7 +23,6 @@ struct FVoxelGrid3D
 	FVoxelGrid3D(int32 X, int32 Y, int32 Z) : Size(FIntVector(X, Y, Z))
 	{
 		Grid.SetNumZeroed(X * Y * Z);
-		VoxelColors.SetNumZeroed(X * Y * Z);
 	}
 
 	bool IsValidIndex(int32 X, int32 Y, int32 Z) const
@@ -40,31 +35,20 @@ struct FVoxelGrid3D
 		return X + (Y * Size.X) + (Z * Size.X * Size.Y);
 	}
 
-	void SetVoxel(int32 X, int32 Y, int32 Z, bool bSolid, FColor Color = FColor::White)
+	void SetVoxel(int32 X, int32 Y, int32 Z, uint8 BlockType)
 	{
 		if (IsValidIndex(X, Y, Z))
 		{
-			int32 Idx = GetIndex(X, Y, Z);
-			Grid[Idx] = bSolid;
-			VoxelColors[Idx] = Color;
+			Grid[GetIndex(X, Y, Z)] = BlockType;
 		}
 	}
 
-	bool GetVoxel(int32 X, int32 Y, int32 Z) const
+	uint8 GetVoxel(int32 X, int32 Y, int32 Z) const
 	{
 		if (IsValidIndex(X, Y, Z))
 		{
 			return Grid[GetIndex(X, Y, Z)];
 		}
-		return false;
-	}
-
-	FColor GetVoxelColor(int32 X, int32 Y, int32 Z) const
-	{
-		if (IsValidIndex(X, Y, Z))
-		{
-			return VoxelColors[GetIndex(X, Y, Z)];
-		}
-		return FColor::White;
+		return 0; // None
 	}
 };

@@ -47,8 +47,7 @@ public:
 	UVoxelObject();
 
 	/** Generates and stores mesh data from a voxel grid. */
-	UFUNCTION(BlueprintCallable, Category = "Voxel")
-	void Build(const FVoxelGrid3D& Grid, float VoxelSize);
+	void Build(const FVoxelGrid3D& Grid, float VoxelSize, TFunctionRef<FColor(uint8 BlockType, const FVector& Pos, const FVector& Normal)> ColorFunc);
 
 	/** Spawns or updates a procedural mesh component on the target actor. */
 	UFUNCTION(BlueprintCallable, Category = "Voxel")
@@ -65,5 +64,5 @@ private:
 	UProceduralMeshComponent* MeshComponent;
 
 	/** Internal mesh generation logic ported from VoxelMeshGenerator */
-	void GenerateMeshFromGrid(const FVoxelGrid3D& Grid, float VoxelSize);
+	void GenerateMeshFromGrid(const FVoxelGrid3D& Grid, float VoxelSize, TFunctionRef<FColor(uint8 BlockType, const FVector& Pos, const FVector& Normal)> ColorFunc);
 };

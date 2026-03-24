@@ -19,6 +19,7 @@ Steps to creating the game:
     - Optimize for more chunk rendering (Done)
         - Implemented and fixed greedy meshing algorithm
     - Refactored voxel mesh generation into `UVoxelObject` (Done)
+    - Refactored voxel system to support block types and dynamic coloring (Done)
     - Add some montains
     - Add props to make the world more vivid (trees)
     - Ensure the artstyle in the world make sense (colors, terrain shape, tree shapes)

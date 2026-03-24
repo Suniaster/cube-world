@@ -88,11 +88,7 @@ void AWorldChunk::GenerateChunk(
 			int32 ColumnHeight = HeightMap[X][Y];
 			for (int32 Z = 0; Z < ColumnHeight; ++Z)
 			{
-				float WorldX = ChunkWorldX + X * InVoxelSize;
-				float WorldY = ChunkWorldY + Y * InVoxelSize;
-				FColor Color = GetVoxelColor(WorldX, WorldY);
-
-				Grid.SetVoxel(X, Y, Z, true, Color);
+				Grid.SetVoxel(X, Y, Z, 1); // Block type 1 for terrain
 			}
 		}
 	}
@@ -102,7 +98,10 @@ void AWorldChunk::GenerateChunk(
 	{
 		VoxelObject = NewObject<UVoxelObject>(this);
 	}
-	VoxelObject->Build(Grid, InVoxelSize);
+
+	VoxelObject->Build(Grid, InVoxelSize, [ChunkWorldX, ChunkWorldY](uint8 BlockType, const FVector& Pos, const FVector& Normal) {
+		return GetVoxelColor(Pos.X + ChunkWorldX, Pos.Y + ChunkWorldY);
+	});
 
 	// 4. Spawn the mesh representation
 	VoxelObject->Spawn(this, InMaterial);
