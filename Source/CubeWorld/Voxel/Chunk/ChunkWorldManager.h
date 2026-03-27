@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "VoxelBiome.h"
+#include "ChunkGenerationTask.h"
 #include "ChunkWorldManager.generated.h"
 
 class AWorldChunk;
@@ -74,6 +75,12 @@ private:
 
 	/** Set of XY columns that have been loaded (all their vertical chunks). */
 	TSet<FIntPoint> LoadedColumns;
+
+	/** Set of chunk keys that have an async generation task in flight. */
+	TSet<FIntVector> InFlightTasks;
+
+	/** Queue of completed async generation results. */
+	TQueue<FChunkGenerationResult, EQueueMode::Mpsc> FinishedTasksQueue;
 
 	/** Last known player chunk coord – avoids redundant updates. */
 	FIntPoint LastPlayerChunk;

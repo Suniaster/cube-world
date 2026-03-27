@@ -52,12 +52,22 @@ public:
 	/** Generates and stores mesh data from a voxel grid with a custom vertex coloring callback. */
 	void Build(const FVoxelGrid3D& Grid, float VoxelSize, TFunctionRef<FColor(uint8 BlockType, const FVector& Pos, const FVector& Normal)> ColorFunc);
 
+	/** Thread-safe static function to generate mesh data from a voxel grid. */
+	static void GenerateMeshData(
+		const FVoxelGrid3D& Grid,
+		float VoxelSize,
+		TFunctionRef<FColor(uint8 BlockType, const FVector& Pos, const FVector& Normal)> ColorFunc,
+		FVoxelMeshData& OutMeshData);
+
 	/** Spawns or updates a procedural mesh component on the target actor. */
 	UFUNCTION(BlueprintCallable, Category = "Voxel")
 	UProceduralMeshComponent* Spawn(AActor* Owner, UMaterialInterface* Material);
 
-	/** Returns the stored mesh data. */
+	/** Returns the stored mesh data (const). */
 	const FVoxelMeshData& GetMeshData() const { return MeshData; }
+
+	/** Returns the stored mesh data (non-const). */
+	FVoxelMeshData& GetMeshData() { return MeshData; }
 
 	/** Returns the spawned mesh component. */
 	UProceduralMeshComponent* GetMeshComponent() const { return MeshComponent; }
@@ -68,7 +78,4 @@ private:
 
 	UPROPERTY()
 	UProceduralMeshComponent* MeshComponent;
-
-	/** Internal mesh generation logic ported from VoxelMeshGenerator */
-	void GenerateMeshFromGrid(const FVoxelGrid3D& Grid, float VoxelSize, TFunctionRef<FColor(uint8 BlockType, const FVector& Pos, const FVector& Normal)>* ColorFunc);
 };

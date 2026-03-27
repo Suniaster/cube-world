@@ -5,6 +5,7 @@
 #include "GameFramework/Pawn.h"
 #include "Engine/World.h"
 #include "Materials/Material.h"
+#include "ChunkGenerationTask.h"
 
 #if WITH_EDITOR
 #include "Materials/MaterialExpressionVertexColor.h"
@@ -91,7 +92,57 @@ void AChunkWorldManager::Tick(float DeltaTime)
 		if (!LoadedColumns.Contains(Coord))
 		{
 			LoadChunkColumn(Coord);
+			// Note: SpawnedThisFrame is now a task dispatch count here, 
+			// but we'll still use it to budget the Tick.
 			SpawnedThisFrame++;
+		}
+	}
+
+	// ── Process Finished Tasks (Budgeted GPU Uploads) ──
+	int32 UploadsThisFrame = 0;
+	FChunkGenerationResult FinishedResult;
+	while (FinishedTasksQueue.Dequeue(FinishedResult) && UploadsThisFrame < MaxChunksPerFrame)
+	{
+		FIntVector Key(FinishedResult.ChunkCoord.X, FinishedResult.ChunkCoord.Y, FinishedResult.ZLayer);
+		InFlightTasks.Remove(Key);
+
+		// If column was unloaded while task was running, discard
+		if (!LoadedColumns.Contains(FinishedResult.ChunkCoord))
+		{
+			continue;
+		}
+
+		if (FinishedResult.bSuccess && FinishedResult.bHasAnyBlocks)
+		{
+			EnsureMaterial();
+			UMaterialInterface* UseMat = TerrainMaterial ? TerrainMaterial : CachedRuntimeMaterial;
+
+			FActorSpawnParameters SpawnParams;
+			SpawnParams.Owner = this;
+
+			// Calculate world-space location for this chunk
+			float ChunkWorldX = static_cast<float>(FinishedResult.ChunkCoord.X) * ChunkSize * VoxelSize;
+			float ChunkWorldY = static_cast<float>(FinishedResult.ChunkCoord.Y) * ChunkSize * VoxelSize;
+			float ChunkWorldZ = static_cast<float>(FinishedResult.ZLayer) * ChunkHeight * VoxelSize;
+			FVector ChunkLocation(ChunkWorldX, ChunkWorldY, ChunkWorldZ);
+
+			AWorldChunk* NewChunk = GetWorld()->SpawnActor<AWorldChunk>(
+				AWorldChunk::StaticClass(),
+				ChunkLocation,
+				FRotator::ZeroRotator,
+				SpawnParams);
+
+			if (NewChunk)
+			{
+				NewChunk->ApplyGeneratedMesh(Key, FinishedResult.MeshData, UseMat);
+				LoadedChunks.Add(Key, NewChunk);
+				UploadsThisFrame++;
+			}
+		}
+		else
+		{
+			// Even if it has no blocks, it's considered "loaded" (just empty)
+			// But we don't spawn an actor.
 		}
 	}
 }
@@ -172,35 +223,25 @@ void AChunkWorldManager::LoadChunkColumn(FIntPoint Coord)
 	int32 MaxZLayers = FMath::CeilToInt32(MaxAmplitude / static_cast<float>(ChunkHeight));
 	MaxZLayers = FMath::Max(MaxZLayers, 1);
 
-	FActorSpawnParameters SpawnParams;
-	SpawnParams.Owner = this;
-
 	for (int32 Z = 0; Z < MaxZLayers; ++Z)
 	{
 		FIntVector ChunkKey(Coord.X, Coord.Y, Z);
+		if (InFlightTasks.Contains(ChunkKey)) continue;
 
-		AWorldChunk* NewChunk = GetWorld()->SpawnActor<AWorldChunk>(
-			AWorldChunk::StaticClass(),
-			FVector::ZeroVector,
-			FRotator::ZeroRotator,
-			SpawnParams);
+		InFlightTasks.Add(ChunkKey);
 
-		if (NewChunk)
-		{
-			NewChunk->GenerateChunk(
-				Coord,
-				Z,
-				ChunkSize,
-				ChunkHeight,
-				VoxelSize,
-				BiomeCellSize,
-				Seed,
-				Biomes,
-				BiomeBlendWidth,
-				UseMat);
-
-			LoadedChunks.Add(ChunkKey, NewChunk);
-		}
+		(new FAutoDeleteAsyncTask<FChunkGenerationTask>(
+			Coord,
+			Z,
+			ChunkSize,
+			ChunkHeight,
+			VoxelSize,
+			BiomeCellSize,
+			Seed,
+			Biomes,
+			BiomeBlendWidth,
+			&FinishedTasksQueue
+		))->StartBackgroundTask();
 	}
 
 	LoadedColumns.Add(Coord);
@@ -226,6 +267,7 @@ void AChunkWorldManager::UnloadChunkColumn(FIntPoint Coord)
 			(*Found)->Destroy();
 		}
 		LoadedChunks.Remove(Key);
+		InFlightTasks.Remove(Key);
 	}
 
 	LoadedColumns.Remove(Coord);

@@ -167,3 +167,35 @@ void AWorldChunk::GenerateChunk(
 	// 5. Spawn the mesh representation
 	VoxelObject->Spawn(this, DynMaterial ? (UMaterialInterface*)DynMaterial : InMaterial);
 }
+
+void AWorldChunk::ApplyGeneratedMesh(const FIntVector& InKey, const FVoxelMeshData& InMeshData, UMaterialInterface* InMaterial)
+{
+	ChunkCoord = FIntPoint(InKey.X, InKey.Y);
+	ZLayer = InKey.Z;
+
+	if (!VoxelObject)
+	{
+		VoxelObject = NewObject<UVoxelObject>(this);
+	}
+
+	// Copy the mesh data into the VoxelObject
+	// Note: UVoxelObject::Spawn will clear it after GPU upload to save memory.
+	VoxelObject->GetMeshData() = InMeshData;
+
+	// Create/Update Dynamic Material
+	UMaterialInstanceDynamic* DynMaterial = nullptr;
+	if (InMaterial)
+	{
+		if (VoxelObject->GetMeshComponent())
+		{
+			DynMaterial = Cast<UMaterialInstanceDynamic>(VoxelObject->GetMeshComponent()->GetMaterial(0));
+		}
+
+		if (!DynMaterial || DynMaterial->Parent != InMaterial)
+		{
+			DynMaterial = UMaterialInstanceDynamic::Create(InMaterial, this);
+		}
+	}
+
+	VoxelObject->Spawn(this, DynMaterial ? (UMaterialInterface*)DynMaterial : InMaterial);
+}

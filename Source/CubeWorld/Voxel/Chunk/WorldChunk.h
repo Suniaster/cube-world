@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "VoxelBiome.h"
+#include "../VoxelObject.h"
 #include "WorldChunk.generated.h"
 
 class UVoxelObject;
@@ -47,6 +48,12 @@ public:
 		float InSeed,
 		const TArray<FVoxelBiomeParams>& InBiomes,
 		float InBlendWidth,
+		UMaterialInterface* InMaterial);
+
+	/** Applies pre-generated mesh data to this chunk (must run on game thread). */
+	void ApplyGeneratedMesh(
+		const FIntVector& InKey,
+		const FVoxelMeshData& InMeshData,
 		UMaterialInterface* InMaterial);
 
 	/** Returns the chunk coordinate this chunk was generated for. */

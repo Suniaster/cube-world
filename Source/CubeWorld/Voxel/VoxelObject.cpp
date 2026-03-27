@@ -69,17 +69,19 @@ UVoxelObject::UVoxelObject()
 
 void UVoxelObject::Build(const FVoxelGrid3D& Grid, float VoxelSize)
 {
-	GenerateMeshFromGrid(Grid, VoxelSize, nullptr);
+	MeshData.Clear();
+	GenerateMeshData(Grid, VoxelSize, [](uint8, const FVector&, const FVector&) { return FColor::White; }, MeshData);
 }
 
 void UVoxelObject::Build(const FVoxelGrid3D& Grid, float VoxelSize, TFunctionRef<FColor(uint8 BlockType, const FVector& Pos, const FVector& Normal)> ColorFunc)
 {
-	GenerateMeshFromGrid(Grid, VoxelSize, &ColorFunc);
+	MeshData.Clear();
+	GenerateMeshData(Grid, VoxelSize, ColorFunc, MeshData);
 }
 
-void UVoxelObject::GenerateMeshFromGrid(const FVoxelGrid3D& Grid, float VoxelSize, TFunctionRef<FColor(uint8 BlockType, const FVector& Pos, const FVector& Normal)>* ColorFunc)
+void UVoxelObject::GenerateMeshData(const FVoxelGrid3D& Grid, float VoxelSize, TFunctionRef<FColor(uint8 BlockType, const FVector& Pos, const FVector& Normal)> ColorFunc, FVoxelMeshData& OutMeshData)
 {
-	MeshData.Clear();
+	OutMeshData.Clear();
 
 	const FIntVector GridSize = Grid.Size;
 	if (GridSize.X <= 0 || GridSize.Y <= 0 || GridSize.Z <= 0) return;
@@ -197,39 +199,31 @@ void UVoxelObject::GenerateMeshFromGrid(const FVoxelGrid3D& Grid, float VoxelSiz
 		};
 		FVector Normal = Normals[FaceIdx];
 
-		int32 BaseIdx = MeshData.Vertices.Num();
+		int32 BaseIdx = OutMeshData.Vertices.Num();
 		for (int32 i = 0; i < 4; ++i)
 		{
-			MeshData.Vertices.Add(Verts[i]);
-			MeshData.Normals.Add(Normal);
-			// Call the color function to get vertex color if provided
-			if (ColorFunc)
-			{
-				MeshData.Colors.Add(FLinearColor((*ColorFunc)(BlockType, Verts[i], Normal)));
-			}
-			else
-			{
-				MeshData.Colors.Add(FLinearColor::White);
-			}
+			OutMeshData.Vertices.Add(Verts[i]);
+			OutMeshData.Normals.Add(Normal);
+			OutMeshData.Colors.Add(FLinearColor(ColorFunc(BlockType, Verts[i], Normal)));
 		}
 
 		if (FaceIdx % 2 == 0) // Negative faces
 		{
-			MeshData.Triangles.Add(BaseIdx + 0);
-			MeshData.Triangles.Add(BaseIdx + 1);
-			MeshData.Triangles.Add(BaseIdx + 2);
-			MeshData.Triangles.Add(BaseIdx + 0);
-			MeshData.Triangles.Add(BaseIdx + 2);
-			MeshData.Triangles.Add(BaseIdx + 3);
+			OutMeshData.Triangles.Add(BaseIdx + 0);
+			OutMeshData.Triangles.Add(BaseIdx + 1);
+			OutMeshData.Triangles.Add(BaseIdx + 2);
+			OutMeshData.Triangles.Add(BaseIdx + 0);
+			OutMeshData.Triangles.Add(BaseIdx + 2);
+			OutMeshData.Triangles.Add(BaseIdx + 3);
 		}
 		else // Positive faces
 		{
-			MeshData.Triangles.Add(BaseIdx + 0);
-			MeshData.Triangles.Add(BaseIdx + 2);
-			MeshData.Triangles.Add(BaseIdx + 1);
-			MeshData.Triangles.Add(BaseIdx + 0);
-			MeshData.Triangles.Add(BaseIdx + 3);
-			MeshData.Triangles.Add(BaseIdx + 2);
+			OutMeshData.Triangles.Add(BaseIdx + 0);
+			OutMeshData.Triangles.Add(BaseIdx + 2);
+			OutMeshData.Triangles.Add(BaseIdx + 1);
+			OutMeshData.Triangles.Add(BaseIdx + 0);
+			OutMeshData.Triangles.Add(BaseIdx + 3);
+			OutMeshData.Triangles.Add(BaseIdx + 2);
 		}
 	};
 
