@@ -6,51 +6,54 @@ void FChunkGenerationTask::DoWork()
 	FChunkGenerationResult Result;
 	Result.ChunkCoord = ChunkCoord;
 	Result.ZLayer = ZLayer;
+	Result.LODLevel = LODLevel;
 	Result.bSuccess = true;
+
+	// Symmetric LOD: every dimension is downsampled by the same factor.
+	const int32 LODScale             = 1 << LODLevel;
+	const int32 EffectiveChunkSize   = ChunkSize   / LODScale;
+	const int32 EffectiveChunkHeight = ChunkHeight / LODScale;
+	const float EffectiveVoxelSize   = VoxelSize   * static_cast<float>(LODScale);
 
 	const float ChunkWorldX = static_cast<float>(ChunkCoord.X) * ChunkSize * VoxelSize;
 	const float ChunkWorldY = static_cast<float>(ChunkCoord.Y) * ChunkSize * VoxelSize;
-	const int32 BiomeCount = Biomes.Num();
-	const int32 ZBase = ZLayer * ChunkHeight;
+	const int32 BiomeCount  = Biomes.Num();
+	const int32 ZBase       = ZLayer * ChunkHeight;
 
-	// 1. Build height map and blend info
-	TArray<TArray<int32>> HeightMap;
+	// 1. Height and biome map at effective resolution
+	TArray<TArray<int32>>           HeightMap;
 	TArray<TArray<FBiomeBlendInfo>> BlendMap;
-	HeightMap.SetNum(ChunkSize);
-	BlendMap.SetNum(ChunkSize);
+	HeightMap.SetNum(EffectiveChunkSize);
+	BlendMap.SetNum(EffectiveChunkSize);
 	bool bHasAnyBlocks = false;
 
-	for (int32 X = 0; X < ChunkSize; ++X)
+	for (int32 X = 0; X < EffectiveChunkSize; ++X)
 	{
-		HeightMap[X].SetNum(ChunkSize);
-		BlendMap[X].SetNum(ChunkSize);
-		for (int32 Y = 0; Y < ChunkSize; ++Y)
+		HeightMap[X].SetNum(EffectiveChunkSize);
+		BlendMap[X].SetNum(EffectiveChunkSize);
+		for (int32 Y = 0; Y < EffectiveChunkSize; ++Y)
 		{
-			float WorldX = ChunkWorldX + X * VoxelSize;
-			float WorldY = ChunkWorldY + Y * VoxelSize;
+			// Sample at the center of the effective (larger) voxel
+			const float SampleX = ChunkWorldX + (X + 0.5f) * EffectiveVoxelSize;
+			const float SampleY = ChunkWorldY + (Y + 0.5f) * EffectiveVoxelSize;
 
 			FBiomeBlendInfo Blend = FVoxelTerrainNoise::GetBiomeBlendAt(
-				WorldX, WorldY, BiomeCellSize, Seed, BiomeCount, BlendWidth);
+				SampleX, SampleY, BiomeCellSize, Seed, BiomeCount, BlendWidth);
 			BlendMap[X][Y] = Blend;
 
-			int32 PrimaryIdx = FMath::Clamp(static_cast<int32>(Blend.PrimaryBiome) - 1, 0, BiomeCount - 1);
-			float H1 = FVoxelTerrainNoise::GetHeightForBiomeFloat(WorldX, WorldY, Biomes[PrimaryIdx], Seed);
+			int32 PriIdx = FMath::Clamp(static_cast<int32>(Blend.PrimaryBiome) - 1, 0, BiomeCount - 1);
+			float H = FVoxelTerrainNoise::GetHeightForBiomeFloat(SampleX, SampleY, Biomes[PriIdx], Seed);
 
-			float FinalHeight = H1;
 			if (Blend.BlendAlpha > SMALL_NUMBER)
 			{
-				int32 SecondaryIdx = FMath::Clamp(static_cast<int32>(Blend.SecondaryBiome) - 1, 0, BiomeCount - 1);
-				float H2 = FVoxelTerrainNoise::GetHeightForBiomeFloat(WorldX, WorldY, Biomes[SecondaryIdx], Seed);
-				FinalHeight = FMath::Lerp(H1, H2, Blend.BlendAlpha);
+				int32 SecIdx = FMath::Clamp(static_cast<int32>(Blend.SecondaryBiome) - 1, 0, BiomeCount - 1);
+				H = FMath::Lerp(H, FVoxelTerrainNoise::GetHeightForBiomeFloat(SampleX, SampleY, Biomes[SecIdx], Seed), Blend.BlendAlpha);
 			}
 
-			int32 H = FMath::Max(FMath::RoundToInt32(FinalHeight), 1);
-			HeightMap[X][Y] = H;
+			HeightMap[X][Y] = FMath::Max(FMath::RoundToInt32(H), 1);
 
-			if (H > ZBase)
-			{
+			if (HeightMap[X][Y] > ZBase)
 				bHasAnyBlocks = true;
-			}
 		}
 	}
 
@@ -58,43 +61,38 @@ void FChunkGenerationTask::DoWork()
 
 	if (bHasAnyBlocks)
 	{
-		// 2. Build Voxel Grid
-		FVoxelGrid3D Grid(ChunkSize, ChunkSize, ChunkHeight);
-		for (int32 X = 0; X < ChunkSize; ++X)
+		// 2. Voxel grid — each effective voxel spans LODScale full-res voxels
+		FVoxelGrid3D Grid(EffectiveChunkSize, EffectiveChunkSize, EffectiveChunkHeight);
+		for (int32 X = 0; X < EffectiveChunkSize; ++X)
 		{
-			for (int32 Y = 0; Y < ChunkSize; ++Y)
+			for (int32 Y = 0; Y < EffectiveChunkSize; ++Y)
 			{
-				int32 WorldColumnHeight = HeightMap[X][Y];
-				uint8 BlockType = static_cast<uint8>(BlendMap[X][Y].PrimaryBiome);
-
-				for (int32 LocalZ = 0; LocalZ < ChunkHeight; ++LocalZ)
+				const uint8 BlockType = static_cast<uint8>(BlendMap[X][Y].PrimaryBiome);
+				for (int32 LocalZ = 0; LocalZ < EffectiveChunkHeight; ++LocalZ)
 				{
-					if (ZBase + LocalZ < WorldColumnHeight)
-					{
+					if (ZBase + LocalZ * LODScale < HeightMap[X][Y])
 						Grid.SetVoxel(X, Y, LocalZ, BlockType);
-					}
 				}
 			}
 		}
 
-		// 3. Generate Mesh Data
-		UVoxelObject::GenerateMeshData(Grid, VoxelSize,
-			[this, &BlendMap, BiomeCount](uint8 BlockType, const FVector& Pos, const FVector& /*Normal*/) -> FColor
+		// 3. Mesh — EffectiveVoxelSize covers XY and Z correctly
+		UVoxelObject::GenerateMeshData(Grid, EffectiveVoxelSize,
+			[this, &BlendMap, BiomeCount, EffectiveChunkSize, EffectiveVoxelSize](uint8 /*BlockType*/, const FVector& Pos, const FVector& /*Normal*/) -> FColor
 			{
-				int32 GridX = FMath::Clamp(FMath::FloorToInt32(Pos.X / VoxelSize), 0, ChunkSize - 1);
-				int32 GridY = FMath::Clamp(FMath::FloorToInt32(Pos.Y / VoxelSize), 0, ChunkSize - 1);
+				int32 GX = FMath::Clamp(FMath::FloorToInt32(Pos.X / EffectiveVoxelSize), 0, EffectiveChunkSize - 1);
+				int32 GY = FMath::Clamp(FMath::FloorToInt32(Pos.Y / EffectiveVoxelSize), 0, EffectiveChunkSize - 1);
 
-				const FBiomeBlendInfo& Blend = BlendMap[GridX][GridY];
+				const FBiomeBlendInfo& Blend = BlendMap[GX][GY];
 				int32 PriIdx = FMath::Clamp(static_cast<int32>(Blend.PrimaryBiome) - 1, 0, BiomeCount - 1);
-				FLinearColor PrimaryColor(Biomes[PriIdx].Color);
+				FLinearColor Color(Biomes[PriIdx].Color);
 
 				if (Blend.BlendAlpha > SMALL_NUMBER)
 				{
 					int32 SecIdx = FMath::Clamp(static_cast<int32>(Blend.SecondaryBiome) - 1, 0, BiomeCount - 1);
-					FLinearColor SecondaryColor(Biomes[SecIdx].Color);
-					return FMath::Lerp(PrimaryColor, SecondaryColor, Blend.BlendAlpha).ToFColor(true);
+					Color = FMath::Lerp(Color, FLinearColor(Biomes[SecIdx].Color), Blend.BlendAlpha);
 				}
-				return PrimaryColor.ToFColor(true);
+				return Color.ToFColor(true);
 			},
 			Result.MeshData);
 	}

@@ -11,12 +11,13 @@ struct FChunkGenerationResult
 {
 	FIntPoint ChunkCoord;
 	int32 ZLayer;
+	int32 LODLevel;
 	FVoxelMeshData MeshData;
 	bool bHasAnyBlocks;
 	bool bSuccess;
 
 	FChunkGenerationResult()
-		: ChunkCoord(0, 0), ZLayer(0), bHasAnyBlocks(false), bSuccess(false)
+		: ChunkCoord(0, 0), ZLayer(0), LODLevel(0), bHasAnyBlocks(false), bSuccess(false)
 	{}
 };
 
@@ -33,6 +34,7 @@ public:
 		int32 InChunkSize,
 		int32 InChunkHeight,
 		float InVoxelSize,
+		int32 InLODLevel,
 		float InBiomeCellSize,
 		float InSeed,
 		TArray<FVoxelBiomeParams> InBiomes,
@@ -43,6 +45,7 @@ public:
 		, ChunkSize(InChunkSize)
 		, ChunkHeight(InChunkHeight)
 		, VoxelSize(InVoxelSize)
+		, LODLevel(InLODLevel)
 		, BiomeCellSize(InBiomeCellSize)
 		, Seed(InSeed)
 		, Biomes(MoveTemp(InBiomes))
@@ -63,6 +66,7 @@ private:
 	int32 ChunkSize;
 	int32 ChunkHeight;
 	float VoxelSize;
+	int32 LODLevel;
 	float BiomeCellSize;
 	float Seed;
 	TArray<FVoxelBiomeParams> Biomes;

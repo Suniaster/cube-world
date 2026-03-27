@@ -54,13 +54,17 @@ public:
 	void ApplyGeneratedMesh(
 		const FIntVector& InKey,
 		const FVoxelMeshData& InMeshData,
-		UMaterialInterface* InMaterial);
+		UMaterialInterface* InMaterial,
+		int32 InLODLevel = 0);
 
 	/** Returns the chunk coordinate this chunk was generated for. */
 	FIntPoint GetChunkCoord() const { return ChunkCoord; }
 
 	/** Returns the vertical layer of this chunk. */
 	int32 GetZLayer() const { return ZLayer; }
+
+	/** Returns the LOD level of this chunk (0 = full detail). */
+	int32 GetLODLevel() const { return LODLevel; }
 
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Voxel")
@@ -69,4 +73,5 @@ protected:
 private:
 	FIntPoint ChunkCoord;
 	int32 ZLayer = 0;
+	int32 LODLevel = 0;
 };

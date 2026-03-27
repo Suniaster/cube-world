@@ -82,20 +82,24 @@ void AChunkWorldManager::Tick(float DeltaTime)
 		UpdateChunksAroundPlayer(CurrentChunk);
 	}
 
-	// ── Process the Column Load Queue (Budgeted) ──
-	int32 SpawnedThisFrame = 0;
-	while (ColumnLoadQueue.Num() > 0 && SpawnedThisFrame < MaxChunksPerFrame)
+	// ── Process the Column Work Queue (Budgeted) ──
+	int32 JobsProcessed = 0;
+	while (ColumnWorkQueue.Num() > 0 && JobsProcessed < MaxChunksPerFrame)
 	{
-		FIntPoint Coord = ColumnLoadQueue[0];
-		ColumnLoadQueue.RemoveAt(0);
+		FIntPoint Coord = ColumnWorkQueue[0];
+		ColumnWorkQueue.RemoveAt(0);
 
+		int32 TargetLOD = ColumnLODs.FindRef(Coord);
 		if (!LoadedColumns.Contains(Coord))
 		{
-			LoadChunkColumn(Coord);
-			// Note: SpawnedThisFrame is now a task dispatch count here, 
-			// but we'll still use it to budget the Tick.
-			SpawnedThisFrame++;
+			DispatchChunkTasks(Coord, TargetLOD);
+			LoadedColumns.Add(Coord);
 		}
+		else
+		{
+			DispatchChunkTasks(Coord, TargetLOD);
+		}
+		JobsProcessed++;
 	}
 
 	// ── Process Finished Tasks (Budgeted GPU Uploads) ──
@@ -104,45 +108,68 @@ void AChunkWorldManager::Tick(float DeltaTime)
 	while (FinishedTasksQueue.Dequeue(FinishedResult) && UploadsThisFrame < MaxChunksPerFrame)
 	{
 		FIntVector Key(FinishedResult.ChunkCoord.X, FinishedResult.ChunkCoord.Y, FinishedResult.ZLayer);
+
+		// If a newer LOD task was dispatched, this result is stale — discard it.
+		int32* InFlightLOD = InFlightTasks.Find(Key);
+		if (InFlightLOD && *InFlightLOD != FinishedResult.LODLevel)
+		{
+			continue;
+		}
 		InFlightTasks.Remove(Key);
 
-		// If column was unloaded while task was running, discard
-		if (!LoadedColumns.Contains(FinishedResult.ChunkCoord))
+		// If column was unloaded or LOD changed since task started, discard
+		if (!LoadedColumns.Contains(FinishedResult.ChunkCoord) || 
+			ColumnLODs.FindRef(FinishedResult.ChunkCoord) != FinishedResult.LODLevel)
 		{
 			continue;
 		}
 
+		EnsureMaterial();
+		UMaterialInterface* UseMat = TerrainMaterial ? TerrainMaterial : CachedRuntimeMaterial;
+
 		if (FinishedResult.bSuccess && FinishedResult.bHasAnyBlocks)
 		{
-			EnsureMaterial();
-			UMaterialInterface* UseMat = TerrainMaterial ? TerrainMaterial : CachedRuntimeMaterial;
-
-			FActorSpawnParameters SpawnParams;
-			SpawnParams.Owner = this;
-
-			// Calculate world-space location for this chunk
-			float ChunkWorldX = static_cast<float>(FinishedResult.ChunkCoord.X) * ChunkSize * VoxelSize;
-			float ChunkWorldY = static_cast<float>(FinishedResult.ChunkCoord.Y) * ChunkSize * VoxelSize;
-			float ChunkWorldZ = static_cast<float>(FinishedResult.ZLayer) * ChunkHeight * VoxelSize;
-			FVector ChunkLocation(ChunkWorldX, ChunkWorldY, ChunkWorldZ);
-
-			AWorldChunk* NewChunk = GetWorld()->SpawnActor<AWorldChunk>(
-				AWorldChunk::StaticClass(),
-				ChunkLocation,
-				FRotator::ZeroRotator,
-				SpawnParams);
-
-			if (NewChunk)
+			// Check if chunk already exists (LOD transition: update mesh in-place)
+			AWorldChunk** ExistingChunkPtr = LoadedChunks.Find(Key);
+			if (ExistingChunkPtr && *ExistingChunkPtr)
 			{
-				NewChunk->ApplyGeneratedMesh(Key, FinishedResult.MeshData, UseMat);
-				LoadedChunks.Add(Key, NewChunk);
+				(*ExistingChunkPtr)->ApplyGeneratedMesh(Key, FinishedResult.MeshData, UseMat, FinishedResult.LODLevel);
 				UploadsThisFrame++;
+			}
+			else
+			{
+				// Spawn new chunk actor
+				FActorSpawnParameters SpawnParams;
+				SpawnParams.Owner = this;
+
+				float ChunkWorldX = static_cast<float>(FinishedResult.ChunkCoord.X) * ChunkSize * VoxelSize;
+				float ChunkWorldY = static_cast<float>(FinishedResult.ChunkCoord.Y) * ChunkSize * VoxelSize;
+				float ChunkWorldZ = static_cast<float>(FinishedResult.ZLayer) * ChunkHeight * VoxelSize;
+				FVector ChunkLocation(ChunkWorldX, ChunkWorldY, ChunkWorldZ);
+
+				AWorldChunk* NewChunk = GetWorld()->SpawnActor<AWorldChunk>(
+					AWorldChunk::StaticClass(),
+					ChunkLocation,
+					FRotator::ZeroRotator,
+					SpawnParams);
+
+				if (NewChunk)
+				{
+					NewChunk->ApplyGeneratedMesh(Key, FinishedResult.MeshData, UseMat, FinishedResult.LODLevel);
+					LoadedChunks.Add(Key, NewChunk);
+					UploadsThisFrame++;
+				}
 			}
 		}
 		else
 		{
-			// Even if it has no blocks, it's considered "loaded" (just empty)
-			// But we don't spawn an actor.
+			// Empty at this LOD. If a chunk actor exists from a previous LOD, destroy it.
+			AWorldChunk** ExistingChunkPtr = LoadedChunks.Find(Key);
+			if (ExistingChunkPtr && *ExistingChunkPtr)
+			{
+				(*ExistingChunkPtr)->Destroy();
+				LoadedChunks.Remove(Key);
+			}
 		}
 	}
 }
@@ -181,70 +208,51 @@ void AChunkWorldManager::UpdateChunksAroundPlayer(FIntPoint PlayerChunk)
 		UnloadChunkColumn(Coord);
 	}
 
-	// Remove no-longer-desired columns from the queue
-	for (int32 i = ColumnLoadQueue.Num() - 1; i >= 0; --i)
+	// Remove no-longer-desired columns from the work queue
+	for (int32 i = ColumnWorkQueue.Num() - 1; i >= 0; --i)
 	{
-		if (!DesiredColumns.Contains(ColumnLoadQueue[i]))
+		if (!DesiredColumns.Contains(ColumnWorkQueue[i]))
 		{
-			ColumnLoadQueue.RemoveAt(i);
+			ColumnWorkQueue.RemoveAt(i);
 		}
 	}
 
-	// 3. Queue new columns
+	// 3. For each desired column, compute LOD and queue if needed
 	for (FIntPoint Coord : DesiredColumns)
 	{
-		if (!LoadedColumns.Contains(Coord) && !ColumnLoadQueue.Contains(Coord))
+		int32 TargetLOD = CalculateLODForColumn(Coord, PlayerChunk);
+		
+		bool bNew = !LoadedColumns.Contains(Coord);
+		bool bLODChanged = LoadedColumns.Contains(Coord) && ColumnLODs.FindRef(Coord) != TargetLOD;
+
+		if ((bNew || bLODChanged) && !ColumnWorkQueue.Contains(Coord))
 		{
-			ColumnLoadQueue.Add(Coord);
+			ColumnLODs.Add(Coord, TargetLOD);
+			ColumnWorkQueue.Add(Coord);
 		}
 	}
 
-	// Sort queue by distance to player (load closest first)
-	ColumnLoadQueue.Sort([PlayerChunk](const FIntPoint& A, const FIntPoint& B) {
+	// Sort work queue: prioritize higher detail (lower LOD) then closer distance
+	ColumnWorkQueue.Sort([this, PlayerChunk](const FIntPoint& A, const FIntPoint& B) {
+		int32 LODA = ColumnLODs.FindRef(A);
+		int32 LODB = ColumnLODs.FindRef(B);
+		if (LODA != LODB) return LODA < LODB;
+
 		float DistA = FVector2D::DistSquared(FVector2D(A), FVector2D(PlayerChunk));
 		float DistB = FVector2D::DistSquared(FVector2D(B), FVector2D(PlayerChunk));
 		return DistA < DistB;
 	});
 }
 
-void AChunkWorldManager::LoadChunkColumn(FIntPoint Coord)
+int32 AChunkWorldManager::CalculateLODForColumn(FIntPoint ColumnCoord, FIntPoint PlayerChunk) const
 {
-	if (LoadedColumns.Contains(Coord)) return;
+	// Chebyshev distance
+	int32 Dist = FMath::Max(FMath::Abs(ColumnCoord.X - PlayerChunk.X), FMath::Abs(ColumnCoord.Y - PlayerChunk.Y));
 
-	EnsureMaterial();
-	UMaterialInterface* UseMat = TerrainMaterial ? TerrainMaterial : CachedRuntimeMaterial;
-
-	// Compute how many vertical layers we might need from the max biome amplitude
-	float MaxAmplitude = 1.0f;
-	for (const FVoxelBiomeParams& B : Biomes)
-	{
-		MaxAmplitude = FMath::Max(MaxAmplitude, B.Amplitude);
-	}
-	int32 MaxZLayers = FMath::CeilToInt32(MaxAmplitude / static_cast<float>(ChunkHeight));
-	MaxZLayers = FMath::Max(MaxZLayers, 1);
-
-	for (int32 Z = 0; Z < MaxZLayers; ++Z)
-	{
-		FIntVector ChunkKey(Coord.X, Coord.Y, Z);
-		if (InFlightTasks.Contains(ChunkKey)) continue;
-
-		InFlightTasks.Add(ChunkKey);
-
-		(new FAutoDeleteAsyncTask<FChunkGenerationTask>(
-			Coord,
-			Z,
-			ChunkSize,
-			ChunkHeight,
-			VoxelSize,
-			BiomeCellSize,
-			Seed,
-			Biomes,
-			BiomeBlendWidth,
-			&FinishedTasksQueue
-		))->StartBackgroundTask();
-	}
-
-	LoadedColumns.Add(Coord);
+	if (Dist <= LODBaseDistance)     return 0; // Full
+	if (Dist <= LODBaseDistance * 2) return 1; // Half
+	if (Dist <= LODBaseDistance * 3) return 2; // Quarter
+	return 3;                                  // Eighth
 }
 
 void AChunkWorldManager::UnloadChunkColumn(FIntPoint Coord)
@@ -271,4 +279,43 @@ void AChunkWorldManager::UnloadChunkColumn(FIntPoint Coord)
 	}
 
 	LoadedColumns.Remove(Coord);
+	ColumnLODs.Remove(Coord);
+}
+
+void AChunkWorldManager::DispatchChunkTasks(FIntPoint Coord, int32 LODLevel)
+{
+	EnsureMaterial();
+
+	float MaxAmplitude = 1.0f;
+	for (const FVoxelBiomeParams& B : Biomes)
+	{
+		MaxAmplitude = FMath::Max(MaxAmplitude, B.Amplitude);
+	}
+	int32 MaxZLayers = FMath::CeilToInt32(MaxAmplitude / static_cast<float>(ChunkHeight));
+	MaxZLayers = FMath::Max(MaxZLayers, 1);
+
+	for (int32 Z = 0; Z < MaxZLayers; ++Z)
+	{
+		FIntVector ChunkKey(Coord.X, Coord.Y, Z);
+
+		// Skip if an async task at the same LOD is already in flight
+		int32* ExistingLOD = InFlightTasks.Find(ChunkKey);
+		if (ExistingLOD && *ExistingLOD == LODLevel) continue;
+
+		InFlightTasks.Add(ChunkKey, LODLevel);
+
+		(new FAutoDeleteAsyncTask<FChunkGenerationTask>(
+			Coord,
+			Z,
+			ChunkSize,
+			ChunkHeight,
+			VoxelSize,
+			LODLevel,
+			BiomeCellSize,
+			Seed,
+			Biomes,
+			BiomeBlendWidth,
+			&FinishedTasksQueue
+		))->StartBackgroundTask();
+	}
 }

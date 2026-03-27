@@ -29,19 +29,31 @@ protected:
 
 	/** Number of voxel columns per chunk side (e.g. 16 = 16x16 grid). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Chunks")
-	int32 ChunkSize = 32;
+	int32 ChunkSize = 64;
 
 	/** Vertical height of each chunk layer in voxel rows. Chunks stack vertically as needed. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Chunks")
-	int32 ChunkHeight = 32;
+	int32 ChunkHeight = 64;
 
 	/** World-space size of one cube in UU. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Chunks")
 	float VoxelSize = 100.0f;
 
-	/** How many chunks around the player to keep loaded (Manhattan radius). */
+	/** How many chunks around the player to keep loaded (Chebyshev radius). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Chunks")
-	int32 RenderDistance = 5;
+	int32 RenderDistance = 32;
+
+	// ── LOD distance control ────────────────────────────────────────────
+
+	/**
+	 * Single control for all LOD thresholds. Each LOD tier spans this many chunks:
+	 *   LOD 0 (full):    0 .. LODBaseDistance
+	 *   LOD 1 (half):    LODBaseDistance+1 .. 2×LODBaseDistance
+	 *   LOD 2 (quarter): 2×LODBaseDistance+1 .. 3×LODBaseDistance
+	 *   LOD 3 (eighth):  beyond 3×LODBaseDistance
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|LOD", meta = (ClampMin = "1"))
+	int32 LODBaseDistance = 5;
 
 	// ── Noise parameters ────────────────────────────────────────────────
 
@@ -76,8 +88,8 @@ private:
 	/** Set of XY columns that have been loaded (all their vertical chunks). */
 	TSet<FIntPoint> LoadedColumns;
 
-	/** Set of chunk keys that have an async generation task in flight. */
-	TSet<FIntVector> InFlightTasks;
+	/** Set of chunk keys that have an async generation task in flight, mapped to the LOD level of the task. */
+	TMap<FIntVector, int32> InFlightTasks;
 
 	/** Queue of completed async generation results. */
 	TQueue<FChunkGenerationResult, EQueueMode::Mpsc> FinishedTasksQueue;
@@ -86,8 +98,11 @@ private:
 	FIntPoint LastPlayerChunk;
 	bool bHasLastPlayerChunk = false;
 
-	/** Queue of XY column coordinates waiting to be loaded. */
-	TArray<FIntPoint> ColumnLoadQueue;
+	/** Queue of XY column coordinates waiting to be loaded or updated (LOD transition). */
+	TArray<FIntPoint> ColumnWorkQueue;
+	
+	/** Currently active LOD level per loaded column. */
+	TMap<FIntPoint, int32> ColumnLODs;
 
 	/** Cached material created at runtime if TerrainMaterial is null. */
 	UPROPERTY()
@@ -99,12 +114,15 @@ private:
 	/** Convert a world position to a horizontal chunk coordinate. */
 	FIntPoint WorldToChunkCoord(const FVector& WorldPos) const;
 
-	/** Load all vertical chunks for an XY column (no-op if already loaded). */
-	void LoadChunkColumn(FIntPoint Coord);
-
 	/** Unload (destroy) all vertical chunks for an XY column. */
 	void UnloadChunkColumn(FIntPoint Coord);
 
 	/** Full update: load nearby columns, unload distant ones. */
 	void UpdateChunksAroundPlayer(FIntPoint PlayerChunk);
+
+	/** Compute LOD tier for a column based on Chebyshev distance to the player chunk. */
+	int32 CalculateLODForColumn(FIntPoint ColumnCoord, FIntPoint PlayerChunk) const;
+
+	/** Dispatch async generation tasks for all Z layers of a column at the given LOD. */
+	void DispatchChunkTasks(FIntPoint Coord, int32 LODLevel);
 };

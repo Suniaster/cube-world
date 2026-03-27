@@ -168,10 +168,11 @@ void AWorldChunk::GenerateChunk(
 	VoxelObject->Spawn(this, DynMaterial ? (UMaterialInterface*)DynMaterial : InMaterial);
 }
 
-void AWorldChunk::ApplyGeneratedMesh(const FIntVector& InKey, const FVoxelMeshData& InMeshData, UMaterialInterface* InMaterial)
+void AWorldChunk::ApplyGeneratedMesh(const FIntVector& InKey, const FVoxelMeshData& InMeshData, UMaterialInterface* InMaterial, int32 InLODLevel)
 {
 	ChunkCoord = FIntPoint(InKey.X, InKey.Y);
 	ZLayer = InKey.Z;
+	LODLevel = InLODLevel;
 
 	if (!VoxelObject)
 	{
@@ -198,4 +199,17 @@ void AWorldChunk::ApplyGeneratedMesh(const FIntVector& InKey, const FVoxelMeshDa
 	}
 
 	VoxelObject->Spawn(this, DynMaterial ? (UMaterialInterface*)DynMaterial : InMaterial);
+
+	// LOD 0 needs collision for gameplay; distant LOD chunks skip it to save physics overhead.
+	if (VoxelObject->GetMeshComponent())
+	{
+		if (LODLevel == 0)
+		{
+			VoxelObject->GetMeshComponent()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+		}
+		else
+		{
+			VoxelObject->GetMeshComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		}
+	}
 }
