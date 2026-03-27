@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "VoxelBiome.h"
 #include "ChunkWorldManager.generated.h"
 
 class AWorldChunk;
@@ -39,27 +40,19 @@ protected:
 
 	// ── Noise parameters ────────────────────────────────────────────────
 
-	/** Base noise frequency (lower = bigger, smoother features). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Noise")
-	float Frequency = 0.001f;
+	/** World-space size of a Worley cell. Controls how large biome regions are. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Biomes")
+	float BiomeCellSize = 100000.0f;
 
-	/** Maximum terrain height in voxel columns. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Noise")
-	float Amplitude = 3.0f;
+	/** Per-biome noise and visual parameters. Index 0 = SnowMountains, 1 = ForestPlains, 2 = Desert. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Biomes")
+	TArray<FVoxelBiomeParams> Biomes;
 
-	/** Number of noise octaves (more = more detail). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Noise")
-	int32 Octaves = 3;
+	/** How wide the transition zone between biomes is, as a fraction of cell size (0 = hard edge, 0.5 = very wide). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Biomes", meta = (ClampMin = "0", ClampMax = "1"))
+	float BiomeBlendWidth = 0.35f;
 
-	/** How quickly each octave's amplitude falls off (0-1). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Noise")
-	float Persistence = 0.35f;
-
-	/** How quickly each octave's frequency increases. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Noise")
-	float Lacunarity = 2.2f;
-
-	/** World seed – different seeds produce different landscapes. */
+	/** World seed – different seeds produce different landscapes and biome layouts. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Noise")
 	float Seed = 0.0f;
 

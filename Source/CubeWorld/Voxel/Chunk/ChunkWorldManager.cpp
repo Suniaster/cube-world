@@ -1,5 +1,6 @@
 #include "ChunkWorldManager.h"
 #include "WorldChunk.h"
+#include "VoxelBiome.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
 #include "Engine/World.h"
@@ -7,19 +8,12 @@
 
 #if WITH_EDITOR
 #include "Materials/MaterialExpressionVertexColor.h"
-#include "Materials/MaterialExpressionWorldPosition.h"
-#include "Materials/MaterialExpressionScalarParameter.h"
-#include "Materials/MaterialExpressionVectorParameter.h"
-#include "Materials/MaterialExpressionMultiply.h"
-#include "Materials/MaterialExpressionAdd.h"
-#include "Materials/MaterialExpressionConstant.h"
-#include "Materials/MaterialExpressionLinearInterpolate.h"
-#include "Materials/MaterialExpressionNoise.h"
 #endif
 
 AChunkWorldManager::AChunkWorldManager()
 {
 	PrimaryActorTick.bCanEverTick = true;
+	Biomes = GetDefaultBiomeParams();
 }
 
 void AChunkWorldManager::BeginPlay()
@@ -45,68 +39,16 @@ void AChunkWorldManager::EnsureMaterial()
 #if WITH_EDITOR
 	if (!CachedRuntimeMaterial)
 	{
-		// Create a DefaultLit material that uses WorldPosition for coloring
+		// Create a DefaultLit material that uses vertex color for biome coloring
 		UMaterial* NewMat = NewObject<UMaterial>(GetTransientPackage(), TEXT("M_VoxelTerrain_Runtime"));
 
-		// 1. World Position
-		UMaterialExpressionWorldPosition* WorldPosExpr = NewObject<UMaterialExpressionWorldPosition>(NewMat);
-		NewMat->GetExpressionCollection().AddExpression(WorldPosExpr);
-
-		// 2. Scale Parameter
-		UMaterialExpressionScalarParameter* ScaleParam = NewObject<UMaterialExpressionScalarParameter>(NewMat);
-		ScaleParam->ParameterName = TEXT("NoiseScale");
-		ScaleParam->DefaultValue = 0.0008f;
-		NewMat->GetExpressionCollection().AddExpression(ScaleParam);
-
-		// 3. Scaled Position
-		UMaterialExpressionMultiply* ScaledPos = NewObject<UMaterialExpressionMultiply>(NewMat);
-		ScaledPos->A.Expression = WorldPosExpr;
-		ScaledPos->B.Expression = ScaleParam;
-		NewMat->GetExpressionCollection().AddExpression(ScaledPos);
-
-		// 4. Noise (Standard noise outputs roughly -1 to 1)
-		UMaterialExpressionNoise* NoiseExpr = NewObject<UMaterialExpressionNoise>(NewMat);
-		NoiseExpr->Position.Expression = ScaledPos;
-		NoiseExpr->Scale = 1.0f;
-		NewMat->GetExpressionCollection().AddExpression(NoiseExpr);
-
-		// 5. Shift Noise Range to 0 - 1
-		// Noise * 0.5 + 0.5
-		UMaterialExpressionConstant* HalfConst = NewObject<UMaterialExpressionConstant>(NewMat);
-		HalfConst->R = 0.5f;
-		NewMat->GetExpressionCollection().AddExpression(HalfConst);
-
-		UMaterialExpressionMultiply* ShiftMult = NewObject<UMaterialExpressionMultiply>(NewMat);
-		ShiftMult->A.Expression = NoiseExpr;
-		ShiftMult->B.Expression = HalfConst;
-		NewMat->GetExpressionCollection().AddExpression(ShiftMult);
-
-		UMaterialExpressionAdd* RangeShiftedNoise = NewObject<UMaterialExpressionAdd>(NewMat);
-		RangeShiftedNoise->A.Expression = ShiftMult;
-		RangeShiftedNoise->B.Expression = HalfConst;
-		NewMat->GetExpressionCollection().AddExpression(RangeShiftedNoise);
-
-		// 6. Color Tones (Dark Green to Light Green)
-		UMaterialExpressionVectorParameter* DarkGreen = NewObject<UMaterialExpressionVectorParameter>(NewMat);
-		DarkGreen->ParameterName = TEXT("DarkColor");
-		DarkGreen->DefaultValue = FLinearColor(0.02f, 0.08f, 0.02f); // Deep forest green
-		NewMat->GetExpressionCollection().AddExpression(DarkGreen);
-
-		UMaterialExpressionVectorParameter* LightGreen = NewObject<UMaterialExpressionVectorParameter>(NewMat);
-		LightGreen->ParameterName = TEXT("LightColor");
-		LightGreen->DefaultValue = FLinearColor(0.12f, 0.28f, 0.08f); // Vibrant grass green
-		NewMat->GetExpressionCollection().AddExpression(LightGreen);
-
-		// 7. Lerp Colors based on noise
-		UMaterialExpressionLinearInterpolate* ColorLerp = NewObject<UMaterialExpressionLinearInterpolate>(NewMat);
-		ColorLerp->A.Expression = DarkGreen;
-		ColorLerp->B.Expression = LightGreen;
-		ColorLerp->Alpha.Expression = RangeShiftedNoise;
-		NewMat->GetExpressionCollection().AddExpression(ColorLerp);
+		// Vertex Color node → Base Color
+		UMaterialExpressionVertexColor* VertColorExpr = NewObject<UMaterialExpressionVertexColor>(NewMat);
+		NewMat->GetExpressionCollection().AddExpression(VertColorExpr);
 
 		if (UMaterialEditorOnlyData* EditorData = NewMat->GetEditorOnlyData())
 		{
-			EditorData->BaseColor.Expression = ColorLerp;
+			EditorData->BaseColor.Expression = VertColorExpr;
 		}
 
 		NewMat->PreEditChange(nullptr);
@@ -236,12 +178,10 @@ void AChunkWorldManager::LoadChunk(FIntPoint Coord)
 			Coord,
 			ChunkSize,
 			VoxelSize,
-			Frequency,
-			Amplitude,
-			Octaves,
-			Persistence,
-			Lacunarity,
+			BiomeCellSize,
 			Seed,
+			Biomes,
+			BiomeBlendWidth,
 			UseMat);
 
 		LoadedChunks.Add(Coord, NewChunk);

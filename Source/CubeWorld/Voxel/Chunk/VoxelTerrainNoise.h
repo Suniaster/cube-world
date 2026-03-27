@@ -1,10 +1,11 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "VoxelBiome.h"
 
 /**
  * Stateless utility for procedural terrain height generation.
- * Uses multi-octave Perlin noise (FBM) to create varied, natural-looking terrain.
+ * Uses Worley noise for biome selection and multi-octave Perlin noise for height.
  */
 struct CUBEWORLD_API FVoxelTerrainNoise
 {
@@ -31,6 +32,20 @@ struct CUBEWORLD_API FVoxelTerrainNoise
 		float Lacunarity,
 		float Seed);
 
+	/** Computes height as a float (for blending) using the given biome noise parameters. */
+	static float GetHeightForBiomeFloat(
+		float WorldX,
+		float WorldY,
+		const FVoxelBiomeParams& Params,
+		float Seed);
+
+	/** Computes height using the given biome noise parameters. */
+	static int32 GetHeightForBiome(
+		float WorldX,
+		float WorldY,
+		const FVoxelBiomeParams& Params,
+		float Seed);
+
 	/**
 	 * Raw FBM noise value in [0, 1] range at the given position.
 	 */
@@ -41,4 +56,46 @@ struct CUBEWORLD_API FVoxelTerrainNoise
 		float Persistence,
 		float Lacunarity,
 		float Seed);
+
+	/**
+	 * Worley (cellular) noise: finds the closest feature point in a cell grid.
+	 * Returns the biome assigned to that feature point.
+	 *
+	 * @param WorldX     X coordinate in world space
+	 * @param WorldY     Y coordinate in world space
+	 * @param CellSize   World-space size of each Worley cell (controls biome scale)
+	 * @param Seed       World seed
+	 * @param BiomeCount Number of biomes to distribute across feature points
+	 * @return The biome for this location
+	 */
+	static EVoxelBiome GetBiomeAt(
+		float WorldX,
+		float WorldY,
+		float CellSize,
+		float Seed,
+		int32 BiomeCount);
+
+	/**
+	 * Worley noise with blend info: returns the two closest biomes and a
+	 * smooth blend factor for transition zones.
+	 *
+	 * @param WorldX     X coordinate in world space
+	 * @param WorldY     Y coordinate in world space
+	 * @param CellSize   World-space size of each Worley cell
+	 * @param Seed       World seed
+	 * @param BiomeCount Number of biomes
+	 * @param BlendWidth Fraction of cell size over which blending occurs (0-1). 0 = hard edges, 0.5 = very wide blend.
+	 * @return FBiomeBlendInfo with primary/secondary biome and blend alpha.
+	 */
+	static FBiomeBlendInfo GetBiomeBlendAt(
+		float WorldX,
+		float WorldY,
+		float CellSize,
+		float Seed,
+		int32 BiomeCount,
+		float BlendWidth);
+
+private:
+	/** Deterministic 2D hash → float in [0, 1). Used for Worley jitter/biome assignment. */
+	static float Hash2D(int32 X, int32 Y, float Seed);
 };
