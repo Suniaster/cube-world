@@ -96,6 +96,22 @@ struct CUBEWORLD_API FVoxelTerrainNoise
 		int32 BiomeCount,
 		float BlendWidth);
 
+	/**
+	 * Computes the final blended terrain height for a given world position.
+	 * Encapsulates both biome lookup and height blending.
+	 *
+	 * @param OutWeights  Returns the biome weights used for this location (useful for coloring).
+	 * @return Final height in voxel columns (clamped to >= 1).
+	 */
+	static int32 GetWeightedHeightForLocation(
+		float WorldX,
+		float WorldY,
+		float BiomeCellSize,
+		float Seed,
+		const TArray<FVoxelBiomeParams>& Biomes,
+		float BlendWidth,
+		FBiomeWeightInfo& OutWeights);
+
 
 private:
 	/** Deterministic 2D hash → float in [0, 1). Used for Worley jitter/biome assignment. */

@@ -221,3 +221,25 @@ FBiomeWeightInfo FVoxelTerrainNoise::GetBiomeWeights(
 
 	return Result;
 }
+
+int32 FVoxelTerrainNoise::GetWeightedHeightForLocation(
+	float WorldX,
+	float WorldY,
+	float BiomeCellSize,
+	float Seed,
+	const TArray<FVoxelBiomeParams>& Biomes,
+	float BlendWidth,
+	FBiomeWeightInfo& OutWeights)
+{
+	OutWeights = GetBiomeWeights(WorldX, WorldY, BiomeCellSize, Seed, Biomes.Num(), BlendWidth);
+
+	float H = 0.0f;
+	for (const auto& Pair : OutWeights.Weights)
+	{
+		int32 BIdx = FMath::Clamp(static_cast<int32>(Pair.Key) - 1, 0, Biomes.Num() - 1);
+		float BiomeH = GetHeightForBiomeFloat(WorldX, WorldY, Biomes[BIdx], Seed);
+		H += BiomeH * Pair.Value;
+	}
+
+	return FMath::Max(FMath::RoundToInt32(H), 1);
+}

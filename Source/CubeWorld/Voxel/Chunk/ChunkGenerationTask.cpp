@@ -37,19 +37,11 @@ void FChunkGenerationTask::DoWork()
 			const float SampleX = ChunkWorldX + (X + 0.5f) * EffectiveVoxelSize;
 			const float SampleY = ChunkWorldY + (Y + 0.5f) * EffectiveVoxelSize;
 
-			FBiomeWeightInfo Weights = FVoxelTerrainNoise::GetBiomeWeights(
-				SampleX, SampleY, BiomeCellSize, Seed, BiomeCount, BlendWidth);
-
-			float H = 0.0f;
-			for (const auto& Pair : Weights.Weights)
-			{
-				int32 BIdx = FMath::Clamp(static_cast<int32>(Pair.Key) - 1, 0, BiomeCount - 1);
-				float BiomeH = FVoxelTerrainNoise::GetHeightForBiomeFloat(SampleX, SampleY, Biomes[BIdx], Seed);
-				H += BiomeH * Pair.Value;
-			}
-
-			HeightMap[X][Y] = FMath::Max(FMath::RoundToInt32(H), 1);
-			BlendMap[X][Y] = Weights; // We'll store FBiomeWeightInfo instead of FBiomeBlendInfo
+			FBiomeWeightInfo Weights;
+			HeightMap[X][Y] = FVoxelTerrainNoise::GetWeightedHeightForLocation(
+				SampleX, SampleY, BiomeCellSize, Seed, Biomes, BlendWidth, Weights);
+			
+			BlendMap[X][Y] = Weights;
 
 			if (HeightMap[X][Y] > ZBase)
 				bHasAnyBlocks = true;
