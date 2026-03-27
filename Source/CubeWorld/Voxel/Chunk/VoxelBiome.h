@@ -57,14 +57,17 @@ struct FVoxelBiomeParams
 /** Number of built-in biomes. */
 inline constexpr int32 VOXEL_BIOME_COUNT = 3;
 
-/** Result of a Worley biome lookup with blending info for smooth transitions. */
-struct FBiomeBlendInfo
+/** Result of a multi-biome lookup with weights for each biome. */
+USTRUCT(BlueprintType)
+struct FBiomeWeightInfo
 {
-	EVoxelBiome PrimaryBiome   = EVoxelBiome::None;
-	EVoxelBiome SecondaryBiome = EVoxelBiome::None;
-	/** 0 = fully primary, 1 = fully secondary. */
-	float BlendAlpha = 0.0f;
+	GENERATED_BODY()
+
+	/** Map of biome type to its influence weight (0.0 to 1.0). */
+	UPROPERTY(BlueprintReadWrite, Category = "Voxel")
+	TMap<EVoxelBiome, float> Weights;
 };
+
 
 /** Returns default biome configurations. Called once to initialize editor defaults. */
 inline TArray<FVoxelBiomeParams> GetDefaultBiomeParams()

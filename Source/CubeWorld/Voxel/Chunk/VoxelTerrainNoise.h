@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "VoxelBiome.h"
 
+
 /**
  * Stateless utility for procedural terrain height generation.
  * Uses Worley noise for biome selection and multi-octave Perlin noise for height.
@@ -76,24 +77,25 @@ struct CUBEWORLD_API FVoxelTerrainNoise
 		int32 BiomeCount);
 
 	/**
-	 * Worley noise with blend info: returns the two closest biomes and a
-	 * smooth blend factor for transition zones.
+	 * Worley noise with multi-biome weights: returns all biomes within the blend range
+	 * and their weights. Prevents "pops" when the 2nd closest biome changes.
 	 *
 	 * @param WorldX     X coordinate in world space
 	 * @param WorldY     Y coordinate in world space
 	 * @param CellSize   World-space size of each Worley cell
 	 * @param Seed       World seed
 	 * @param BiomeCount Number of biomes
-	 * @param BlendWidth Fraction of cell size over which blending occurs (0-1). 0 = hard edges, 0.5 = very wide blend.
-	 * @return FBiomeBlendInfo with primary/secondary biome and blend alpha.
+	 * @param BlendWidth Fraction of cell size over which blending occurs (0-1).
+	 * @return FBiomeWeightInfo with a map of biomes and their weights.
 	 */
-	static FBiomeBlendInfo GetBiomeBlendAt(
+	static FBiomeWeightInfo GetBiomeWeights(
 		float WorldX,
 		float WorldY,
 		float CellSize,
 		float Seed,
 		int32 BiomeCount,
 		float BlendWidth);
+
 
 private:
 	/** Deterministic 2D hash → float in [0, 1). Used for Worley jitter/biome assignment. */

@@ -47,7 +47,7 @@ void AWorldChunk::GenerateChunk(
 
 	// 1. Build height map, biome map, and blend info per column
 	TArray<TArray<int32>>           HeightMap;  // full world height per column
-	TArray<TArray<FBiomeBlendInfo>> BlendMap;
+	TArray<TArray<FBiomeWeightInfo>> BlendMap;
 	HeightMap.SetNum(InChunkSize);
 	BlendMap.SetNum(InChunkSize);
 	bool bHasAnyBlocks = false;
@@ -62,23 +62,16 @@ void AWorldChunk::GenerateChunk(
 			float WorldY = ChunkWorldY + Y * InVoxelSize;
 
 			// Worley noise with blend info
-			FBiomeBlendInfo Blend = FVoxelTerrainNoise::GetBiomeBlendAt(
+			FBiomeWeightInfo Weights = FVoxelTerrainNoise::GetBiomeWeights(
 				WorldX, WorldY, InBiomeCellSize, InSeed, BiomeCount, InBlendWidth);
-			BlendMap[X][Y] = Blend;
+			BlendMap[X][Y] = Weights;
 
-			// Primary biome height (full world height)
-			int32 PrimaryIdx = FMath::Clamp(static_cast<int32>(Blend.PrimaryBiome) - 1, 0, BiomeCount - 1);
-			float H1 = FVoxelTerrainNoise::GetHeightForBiomeFloat(
-				WorldX, WorldY, InBiomes[PrimaryIdx], InSeed);
-
-			float FinalHeight = H1;
-
-			if (Blend.BlendAlpha > SMALL_NUMBER)
+			float FinalHeight = 0.0f;
+			for (const auto& Pair : Weights.Weights)
 			{
-				int32 SecondaryIdx = FMath::Clamp(static_cast<int32>(Blend.SecondaryBiome) - 1, 0, BiomeCount - 1);
-				float H2 = FVoxelTerrainNoise::GetHeightForBiomeFloat(
-					WorldX, WorldY, InBiomes[SecondaryIdx], InSeed);
-				FinalHeight = FMath::Lerp(H1, H2, Blend.BlendAlpha);
+				int32 BIdx = FMath::Clamp(static_cast<int32>(Pair.Key) - 1, 0, BiomeCount - 1);
+				float BiomeH = FVoxelTerrainNoise::GetHeightForBiomeFloat(WorldX, WorldY, InBiomes[BIdx], InSeed);
+				FinalHeight += BiomeH * Pair.Value;
 			}
 
 			int32 H = FMath::Max(FMath::RoundToInt32(FinalHeight), 1);
@@ -106,7 +99,19 @@ void AWorldChunk::GenerateChunk(
 		for (int32 Y = 0; Y < InChunkSize; ++Y)
 		{
 			int32 WorldColumnHeight = HeightMap[X][Y];
-			uint8 BlockType = static_cast<uint8>(BlendMap[X][Y].PrimaryBiome);
+			
+			// Find primary biome (highest weight)
+			EVoxelBiome PrimaryBiome = EVoxelBiome::ForestPlains;
+			float MaxWeight = -1.0f;
+			for (const auto& Pair : BlendMap[X][Y].Weights)
+			{
+				if (Pair.Value > MaxWeight)
+				{
+					MaxWeight = Pair.Value;
+					PrimaryBiome = Pair.Key;
+				}
+			}
+			uint8 BlockType = static_cast<uint8>(PrimaryBiome);
 
 			// Fill blocks within this layer's Z range
 			for (int32 LocalZ = 0; LocalZ < InChunkHeight; ++LocalZ)
@@ -133,20 +138,16 @@ void AWorldChunk::GenerateChunk(
 			int32 GridX = FMath::Clamp(FMath::FloorToInt32(Pos.X / InVoxelSize), 0, InChunkSize - 1);
 			int32 GridY = FMath::Clamp(FMath::FloorToInt32(Pos.Y / InVoxelSize), 0, InChunkSize - 1);
 
-			const FBiomeBlendInfo& Blend = BlendMap[GridX][GridY];
+			const FBiomeWeightInfo& Weights = BlendMap[GridX][GridY];
+			FLinearColor FinalColor(0, 0, 0, 0);
 
-			int32 PriIdx = FMath::Clamp(static_cast<int32>(Blend.PrimaryBiome) - 1, 0, BiomeCount - 1);
-			FLinearColor PrimaryColor(InBiomes[PriIdx].Color);
-
-			if (Blend.BlendAlpha > SMALL_NUMBER)
+			for (const auto& Pair : Weights.Weights)
 			{
-				int32 SecIdx = FMath::Clamp(static_cast<int32>(Blend.SecondaryBiome) - 1, 0, BiomeCount - 1);
-				FLinearColor SecondaryColor(InBiomes[SecIdx].Color);
-				FLinearColor Blended = FMath::Lerp(PrimaryColor, SecondaryColor, Blend.BlendAlpha);
-				return Blended.ToFColor(true);
+				int32 BIdx = FMath::Clamp(static_cast<int32>(Pair.Key) - 1, 0, BiomeCount - 1);
+				FinalColor += FLinearColor(InBiomes[BIdx].Color) * Pair.Value;
 			}
 
-			return PrimaryColor.ToFColor(true);
+			return FinalColor.ToFColor(true);
 		});
 
 	// 4. Create/Update Dynamic Material

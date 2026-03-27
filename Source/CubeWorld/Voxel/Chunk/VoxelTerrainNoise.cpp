@@ -141,7 +141,8 @@ EVoxelBiome FVoxelTerrainNoise::GetBiomeAt(
 
 // ── Worley noise with biome blending ────────────────────────────────────────
 
-FBiomeBlendInfo FVoxelTerrainNoise::GetBiomeBlendAt(
+
+FBiomeWeightInfo FVoxelTerrainNoise::GetBiomeWeights(
 	float WorldX,
 	float WorldY,
 	float CellSize,
@@ -154,73 +155,68 @@ FBiomeBlendInfo FVoxelTerrainNoise::GetBiomeBlendAt(
 	int32 CellIX = FMath::FloorToInt32(CellX);
 	int32 CellIY = FMath::FloorToInt32(CellY);
 
-	// Track the two closest feature points
-	float Dist1 = TNumericLimits<float>::Max(); // closest
-	float Dist2 = TNumericLimits<float>::Max(); // second closest
-	int32 Biome1Idx = 0;
-	int32 Biome2Idx = 0;
-
-	// Search 3x3 neighborhood of cells
+	// First pass: find the absolute closest feature point distance (D1)
+	float MinDistSq = TNumericLimits<float>::Max();
 	for (int32 DX = -1; DX <= 1; ++DX)
 	{
 		for (int32 DY = -1; DY <= 1; ++DY)
 		{
 			int32 NX = CellIX + DX;
 			int32 NY = CellIY + DY;
-
 			float JitterX = Hash2D(NX, NY, Seed);
 			float JitterY = Hash2D(NX + 1000, NY + 1000, Seed);
-			float FeatureX = static_cast<float>(NX) + JitterX;
-			float FeatureY = static_cast<float>(NY) + JitterY;
+			float DistSq = FVector2D::DistSquared(FVector2D(CellX, CellY), FVector2D(NX + JitterX, NY + JitterY));
+			MinDistSq = FMath::Min(MinDistSq, DistSq);
+		}
+	}
 
-			float Dist = FVector2D::DistSquared(
-				FVector2D(CellX, CellY),
-				FVector2D(FeatureX, FeatureY));
+	float D1 = FMath::Sqrt(MinDistSq);
+	FBiomeWeightInfo Result;
+	float TotalWeight = 0.0f;
 
-			float BiomeHash = Hash2D(NX + 2000, NY + 2000, Seed);
-			int32 BiomeIdx = FMath::Clamp(FMath::FloorToInt32(BiomeHash * BiomeCount), 0, BiomeCount - 1);
+	// Second pass: accumulate weights for all points within (D1 + BlendWidth)
+	for (int32 DX = -1; DX <= 1; ++DX)
+	{
+		for (int32 DY = -1; DY <= 1; ++DY)
+		{
+			int32 NX = CellIX + DX;
+			int32 NY = CellIY + DY;
+			float JitterX = Hash2D(NX, NY, Seed);
+			float JitterY = Hash2D(NX + 1000, NY + 1000, Seed);
+			float DistSq = FVector2D::DistSquared(FVector2D(CellX, CellY), FVector2D(NX + JitterX, NY + JitterY));
+			float Di = FMath::Sqrt(DistSq);
 
-			if (Dist < Dist1)
+			float Diff = Di - D1;
+			if (Diff < BlendWidth)
 			{
-				// Current closest becomes second closest
-				Dist2 = Dist1;
-				Biome2Idx = Biome1Idx;
-				// New closest
-				Dist1 = Dist;
-				Biome1Idx = BiomeIdx;
-			}
-			else if (Dist < Dist2)
-			{
-				Dist2 = Dist;
-				Biome2Idx = BiomeIdx;
+				float BiomeHash = Hash2D(NX + 2000, NY + 2000, Seed);
+				int32 BiomeIdx = FMath::Clamp(FMath::FloorToInt32(BiomeHash * BiomeCount), 0, BiomeCount - 1);
+				EVoxelBiome Biome = static_cast<EVoxelBiome>(BiomeIdx + 1);
+
+				// Basic linear weight that goes to zero exactly at BlendWidth distance from D1
+				float T = 1.0f - FMath::Clamp(Diff / (BlendWidth + SMALL_NUMBER), 0.0f, 1.0f);
+				// Cubic smoothstep for a softer transition
+				float Weight = T * T * (3.0f - 2.0f * T);
+
+				float& ExistingWeight = Result.Weights.FindOrAdd(Biome);
+				ExistingWeight += Weight;
+				TotalWeight += Weight;
 			}
 		}
 	}
 
-	FBiomeBlendInfo Result;
-	Result.PrimaryBiome   = static_cast<EVoxelBiome>(Biome1Idx + 1);
-	Result.SecondaryBiome = static_cast<EVoxelBiome>(Biome2Idx + 1);
-
-	// Compute blend alpha: based on how close this point is to the border
-	// between the two nearest feature points.
-	// (d2 - d1) / (d1 + d2) ranges from 0 (on border) to ~1 (deep inside a biome).
-	// We use sqrt of distances for more linear falloff.
-	float D1 = FMath::Sqrt(Dist1);
-	float D2 = FMath::Sqrt(Dist2);
-	float BorderProximity = (D2 - D1) / (D1 + D2 + SMALL_NUMBER);
-
-	// BlendWidth controls how wide the transition zone is.
-	// When BorderProximity < BlendWidth, we're in the blend zone.
-	if (BlendWidth > SMALL_NUMBER)
+	// Normalize
+	if (TotalWeight > SMALL_NUMBER)
 	{
-		// Smoothstep from 0 (on border) to BlendWidth (fully inside primary)
-		float T = FMath::Clamp(BorderProximity / BlendWidth, 0.0f, 1.0f);
-		// Smoothstep for a nice non-linear falloff
-		Result.BlendAlpha = (1.0f - T * T * (3.0f - 2.0f * T)) * 0.5f;
+		for (auto& Pair : Result.Weights)
+		{
+			Pair.Value /= TotalWeight;
+		}
 	}
 	else
 	{
-		Result.BlendAlpha = 0.0f; // no blending
+		// Fallback (this shouldn't happen)
+		Result.Weights.Add(EVoxelBiome::ForestPlains, 1.0f);
 	}
 
 	return Result;
