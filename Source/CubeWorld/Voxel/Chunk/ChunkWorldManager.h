@@ -30,6 +30,10 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Chunks")
 	int32 ChunkSize = 32;
 
+	/** Vertical height of each chunk layer in voxel rows. Chunks stack vertically as needed. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Chunks")
+	int32 ChunkHeight = 32;
+
 	/** World-space size of one cube in UU. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Chunks")
 	float VoxelSize = 100.0f;
@@ -65,15 +69,18 @@ protected:
 	UMaterialInterface* TerrainMaterial;
 
 private:
-	/** Currently loaded chunks, keyed by chunk coordinate. */
-	TMap<FIntPoint, AWorldChunk*> LoadedChunks;
+	/** Currently loaded chunks, keyed by 3D chunk coordinate (X, Y, Z layer). */
+	TMap<FIntVector, AWorldChunk*> LoadedChunks;
+
+	/** Set of XY columns that have been loaded (all their vertical chunks). */
+	TSet<FIntPoint> LoadedColumns;
 
 	/** Last known player chunk coord – avoids redundant updates. */
 	FIntPoint LastPlayerChunk;
 	bool bHasLastPlayerChunk = false;
 
-	/** Queue of chunk coordinates waiting to be loaded. */
-	TArray<FIntPoint> ChunkLoadQueue;
+	/** Queue of XY column coordinates waiting to be loaded. */
+	TArray<FIntPoint> ColumnLoadQueue;
 
 	/** Cached material created at runtime if TerrainMaterial is null. */
 	UPROPERTY()
@@ -82,15 +89,15 @@ private:
 	/** Ensures the terrain material is loaded or created. */
 	void EnsureMaterial();
 
-	/** Convert a world position to a chunk coordinate. */
+	/** Convert a world position to a horizontal chunk coordinate. */
 	FIntPoint WorldToChunkCoord(const FVector& WorldPos) const;
 
-	/** Load a chunk at the given coordinate (no-op if already loaded). */
-	void LoadChunk(FIntPoint Coord);
+	/** Load all vertical chunks for an XY column (no-op if already loaded). */
+	void LoadChunkColumn(FIntPoint Coord);
 
-	/** Unload (destroy) a chunk at the given coordinate. */
-	void UnloadChunk(FIntPoint Coord);
+	/** Unload (destroy) all vertical chunks for an XY column. */
+	void UnloadChunkColumn(FIntPoint Coord);
 
-	/** Full update: load nearby chunks, unload distant ones. */
+	/** Full update: load nearby columns, unload distant ones. */
 	void UpdateChunksAroundPlayer(FIntPoint PlayerChunk);
 };

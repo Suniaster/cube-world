@@ -81,16 +81,16 @@ void AChunkWorldManager::Tick(float DeltaTime)
 		UpdateChunksAroundPlayer(CurrentChunk);
 	}
 
-	// ── Process the Load Queue (Budgeted) ──
+	// ── Process the Column Load Queue (Budgeted) ──
 	int32 SpawnedThisFrame = 0;
-	while (ChunkLoadQueue.Num() > 0 && SpawnedThisFrame < MaxChunksPerFrame)
+	while (ColumnLoadQueue.Num() > 0 && SpawnedThisFrame < MaxChunksPerFrame)
 	{
-		FIntPoint Coord = ChunkLoadQueue[0];
-		ChunkLoadQueue.RemoveAt(0);
+		FIntPoint Coord = ColumnLoadQueue[0];
+		ColumnLoadQueue.RemoveAt(0);
 
-		if (!LoadedChunks.Contains(Coord))
+		if (!LoadedColumns.Contains(Coord))
 		{
-			LoadChunk(Coord);
+			LoadChunkColumn(Coord);
 			SpawnedThisFrame++;
 		}
 	}
@@ -106,94 +106,127 @@ FIntPoint AChunkWorldManager::WorldToChunkCoord(const FVector& WorldPos) const
 
 void AChunkWorldManager::UpdateChunksAroundPlayer(FIntPoint PlayerChunk)
 {
-	// 1. Determine which chunks should be loaded
-	TSet<FIntPoint> DesiredChunks;
+	// 1. Determine which XY columns should be loaded
+	TSet<FIntPoint> DesiredColumns;
 	for (int32 DX = -RenderDistance; DX <= RenderDistance; ++DX)
 	{
 		for (int32 DY = -RenderDistance; DY <= RenderDistance; ++DY)
 		{
-			DesiredChunks.Add(FIntPoint(PlayerChunk.X + DX, PlayerChunk.Y + DY));
+			DesiredColumns.Add(FIntPoint(PlayerChunk.X + DX, PlayerChunk.Y + DY));
 		}
 	}
 
-	// 2. Unload chunks that are no longer needed
+	// 2. Unload columns that are no longer needed
 	TArray<FIntPoint> ToUnload;
-	for (auto& Pair : LoadedChunks)
+	for (FIntPoint Col : LoadedColumns)
 	{
-		if (!DesiredChunks.Contains(Pair.Key))
+		if (!DesiredColumns.Contains(Col))
 		{
-			ToUnload.Add(Pair.Key);
+			ToUnload.Add(Col);
 		}
 	}
 	for (FIntPoint Coord : ToUnload)
 	{
-		UnloadChunk(Coord);
+		UnloadChunkColumn(Coord);
 	}
 
-	// Remove no-longer-desired chunks from the queue
-	for (int32 i = ChunkLoadQueue.Num() - 1; i >= 0; --i)
+	// Remove no-longer-desired columns from the queue
+	for (int32 i = ColumnLoadQueue.Num() - 1; i >= 0; --i)
 	{
-		if (!DesiredChunks.Contains(ChunkLoadQueue[i]))
+		if (!DesiredColumns.Contains(ColumnLoadQueue[i]))
 		{
-			ChunkLoadQueue.RemoveAt(i);
+			ColumnLoadQueue.RemoveAt(i);
 		}
 	}
 
-	// 3. Queue new chunks
-	for (FIntPoint Coord : DesiredChunks)
+	// 3. Queue new columns
+	for (FIntPoint Coord : DesiredColumns)
 	{
-		if (!LoadedChunks.Contains(Coord) && !ChunkLoadQueue.Contains(Coord))
+		if (!LoadedColumns.Contains(Coord) && !ColumnLoadQueue.Contains(Coord))
 		{
-			ChunkLoadQueue.Add(Coord);
+			ColumnLoadQueue.Add(Coord);
 		}
 	}
 
 	// Sort queue by distance to player (load closest first)
-	ChunkLoadQueue.Sort([PlayerChunk](const FIntPoint& A, const FIntPoint& B) {
+	ColumnLoadQueue.Sort([PlayerChunk](const FIntPoint& A, const FIntPoint& B) {
 		float DistA = FVector2D::DistSquared(FVector2D(A), FVector2D(PlayerChunk));
 		float DistB = FVector2D::DistSquared(FVector2D(B), FVector2D(PlayerChunk));
 		return DistA < DistB;
 	});
 }
 
-void AChunkWorldManager::LoadChunk(FIntPoint Coord)
+void AChunkWorldManager::LoadChunkColumn(FIntPoint Coord)
 {
-	if (LoadedChunks.Contains(Coord)) return;
+	if (LoadedColumns.Contains(Coord)) return;
 
 	EnsureMaterial();
 	UMaterialInterface* UseMat = TerrainMaterial ? TerrainMaterial : CachedRuntimeMaterial;
 
+	// Compute how many vertical layers we might need from the max biome amplitude
+	float MaxAmplitude = 1.0f;
+	for (const FVoxelBiomeParams& B : Biomes)
+	{
+		MaxAmplitude = FMath::Max(MaxAmplitude, B.Amplitude);
+	}
+	int32 MaxZLayers = FMath::CeilToInt32(MaxAmplitude / static_cast<float>(ChunkHeight));
+	MaxZLayers = FMath::Max(MaxZLayers, 1);
+
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.Owner = this;
 
-	AWorldChunk* NewChunk = GetWorld()->SpawnActor<AWorldChunk>(
-		AWorldChunk::StaticClass(),
-		FVector::ZeroVector,
-		FRotator::ZeroRotator,
-		SpawnParams);
-
-	if (NewChunk)
+	for (int32 Z = 0; Z < MaxZLayers; ++Z)
 	{
-		NewChunk->GenerateChunk(
-			Coord,
-			ChunkSize,
-			VoxelSize,
-			BiomeCellSize,
-			Seed,
-			Biomes,
-			BiomeBlendWidth,
-			UseMat);
+		FIntVector ChunkKey(Coord.X, Coord.Y, Z);
 
-		LoadedChunks.Add(Coord, NewChunk);
+		AWorldChunk* NewChunk = GetWorld()->SpawnActor<AWorldChunk>(
+			AWorldChunk::StaticClass(),
+			FVector::ZeroVector,
+			FRotator::ZeroRotator,
+			SpawnParams);
+
+		if (NewChunk)
+		{
+			NewChunk->GenerateChunk(
+				Coord,
+				Z,
+				ChunkSize,
+				ChunkHeight,
+				VoxelSize,
+				BiomeCellSize,
+				Seed,
+				Biomes,
+				BiomeBlendWidth,
+				UseMat);
+
+			LoadedChunks.Add(ChunkKey, NewChunk);
+		}
 	}
+
+	LoadedColumns.Add(Coord);
 }
 
-void AChunkWorldManager::UnloadChunk(FIntPoint Coord)
+void AChunkWorldManager::UnloadChunkColumn(FIntPoint Coord)
 {
-	AWorldChunk** Found = LoadedChunks.Find(Coord);
-	if (Found && *Found)
+	// Remove all vertical chunks for this XY column
+	TArray<FIntVector> ToRemove;
+	for (auto& Pair : LoadedChunks)
 	{
-		(*Found)->Destroy();
+		if (Pair.Key.X == Coord.X && Pair.Key.Y == Coord.Y)
+		{
+			ToRemove.Add(Pair.Key);
+		}
 	}
-	LoadedChunks.Remove(Coord);
+
+	for (const FIntVector& Key : ToRemove)
+	{
+		AWorldChunk** Found = LoadedChunks.Find(Key);
+		if (Found && *Found)
+		{
+			(*Found)->Destroy();
+		}
+		LoadedChunks.Remove(Key);
+	}
+
+	LoadedColumns.Remove(Coord);
 }

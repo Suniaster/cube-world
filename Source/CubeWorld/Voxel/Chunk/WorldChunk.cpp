@@ -23,7 +23,9 @@ AWorldChunk::AWorldChunk()
 
 void AWorldChunk::GenerateChunk(
 	FIntPoint InChunkCoord,
+	int32 InZLayer,
 	int32 InChunkSize,
+	int32 InChunkHeight,
 	float InVoxelSize,
 	float InBiomeCellSize,
 	float InSeed,
@@ -32,27 +34,27 @@ void AWorldChunk::GenerateChunk(
 	UMaterialInterface* InMaterial)
 {
 	ChunkCoord = InChunkCoord;
+	ZLayer = InZLayer;
 
-	// World-space origin of this chunk
+	// World-space origin of this chunk (including vertical offset)
 	float ChunkWorldX = static_cast<float>(InChunkCoord.X) * InChunkSize * InVoxelSize;
 	float ChunkWorldY = static_cast<float>(InChunkCoord.Y) * InChunkSize * InVoxelSize;
-	SetActorLocation(FVector(ChunkWorldX, ChunkWorldY, 0.0f));
+	float ChunkWorldZ = static_cast<float>(InZLayer) * InChunkHeight * InVoxelSize;
+	SetActorLocation(FVector(ChunkWorldX, ChunkWorldY, ChunkWorldZ));
 
 	const int32 BiomeCount = InBiomes.Num();
+	const int32 ZBase = InZLayer * InChunkHeight; // world Z index of this layer's bottom
 
-	// 1. Build height map, biome map, and per-column blend info
-	TArray<TArray<int32>>          HeightMap;
-	TArray<TArray<EVoxelBiome>>    BiomeMap;
+	// 1. Build height map, biome map, and blend info per column
+	TArray<TArray<int32>>           HeightMap;  // full world height per column
 	TArray<TArray<FBiomeBlendInfo>> BlendMap;
 	HeightMap.SetNum(InChunkSize);
-	BiomeMap.SetNum(InChunkSize);
 	BlendMap.SetNum(InChunkSize);
-	int32 MaxHeight = 0;
+	bool bHasAnyBlocks = false;
 
 	for (int32 X = 0; X < InChunkSize; ++X)
 	{
 		HeightMap[X].SetNum(InChunkSize);
-		BiomeMap[X].SetNum(InChunkSize);
 		BlendMap[X].SetNum(InChunkSize);
 		for (int32 Y = 0; Y < InChunkSize; ++Y)
 		{
@@ -63,43 +65,57 @@ void AWorldChunk::GenerateChunk(
 			FBiomeBlendInfo Blend = FVoxelTerrainNoise::GetBiomeBlendAt(
 				WorldX, WorldY, InBiomeCellSize, InSeed, BiomeCount, InBlendWidth);
 			BlendMap[X][Y] = Blend;
-			BiomeMap[X][Y] = Blend.PrimaryBiome;
 
-			// Primary biome height
+			// Primary biome height (full world height)
 			int32 PrimaryIdx = FMath::Clamp(static_cast<int32>(Blend.PrimaryBiome) - 1, 0, BiomeCount - 1);
 			float H1 = FVoxelTerrainNoise::GetHeightForBiomeFloat(
 				WorldX, WorldY, InBiomes[PrimaryIdx], InSeed);
 
 			float FinalHeight = H1;
 
-			// Blend with secondary biome if in transition zone
 			if (Blend.BlendAlpha > SMALL_NUMBER)
 			{
 				int32 SecondaryIdx = FMath::Clamp(static_cast<int32>(Blend.SecondaryBiome) - 1, 0, BiomeCount - 1);
 				float H2 = FVoxelTerrainNoise::GetHeightForBiomeFloat(
 					WorldX, WorldY, InBiomes[SecondaryIdx], InSeed);
-
 				FinalHeight = FMath::Lerp(H1, H2, Blend.BlendAlpha);
 			}
 
 			int32 H = FMath::Max(FMath::RoundToInt32(FinalHeight), 1);
 			HeightMap[X][Y] = H;
-			MaxHeight = FMath::Max(MaxHeight, H);
+
+			// Does any block in this column fall within our Z layer?
+			if (H > ZBase)
+			{
+				bHasAnyBlocks = true;
+			}
 		}
 	}
 
-	// 2. Build Voxel Grid – block type encodes the primary biome
-	FVoxelGrid3D Grid(InChunkSize, InChunkSize, MaxHeight);
+	// Early out: if no column reaches this Z layer, skip mesh generation entirely
+	if (!bHasAnyBlocks)
+	{
+		return;
+	}
+
+	// 2. Build Voxel Grid for this Z layer only
+	FVoxelGrid3D Grid(InChunkSize, InChunkSize, InChunkHeight);
 
 	for (int32 X = 0; X < InChunkSize; ++X)
 	{
 		for (int32 Y = 0; Y < InChunkSize; ++Y)
 		{
-			int32 ColumnHeight = HeightMap[X][Y];
-			uint8 BlockType = static_cast<uint8>(BiomeMap[X][Y]);
-			for (int32 Z = 0; Z < ColumnHeight; ++Z)
+			int32 WorldColumnHeight = HeightMap[X][Y];
+			uint8 BlockType = static_cast<uint8>(BlendMap[X][Y].PrimaryBiome);
+
+			// Fill blocks within this layer's Z range
+			for (int32 LocalZ = 0; LocalZ < InChunkHeight; ++LocalZ)
 			{
-				Grid.SetVoxel(X, Y, Z, BlockType);
+				int32 WorldZ = ZBase + LocalZ;
+				if (WorldZ < WorldColumnHeight)
+				{
+					Grid.SetVoxel(X, Y, LocalZ, BlockType);
+				}
 			}
 		}
 	}
@@ -110,14 +126,10 @@ void AWorldChunk::GenerateChunk(
 		VoxelObject = NewObject<UVoxelObject>(this);
 	}
 
-	// Capture blend/biome data for the color callback
-	// The color callback receives positions in local space (grid coords * VoxelSize),
-	// so we recover grid X,Y from the vertex position.
 	VoxelObject->Build(Grid, InVoxelSize,
 		[&InBiomes, &BlendMap, BiomeCount, InVoxelSize, InChunkSize]
 		(uint8 BlockType, const FVector& Pos, const FVector& /*Normal*/) -> FColor
 		{
-			// Recover grid coordinates from local vertex position
 			int32 GridX = FMath::Clamp(FMath::FloorToInt32(Pos.X / InVoxelSize), 0, InChunkSize - 1);
 			int32 GridY = FMath::Clamp(FMath::FloorToInt32(Pos.Y / InVoxelSize), 0, InChunkSize - 1);
 
