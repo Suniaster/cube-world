@@ -369,9 +369,17 @@ void ABlankChar::SetupPlayerInputComponent(
   PlayerInputComponent->BindAction("Roll", IE_Pressed, this,
                                    &ABlankChar::StartRoll);
 
+  // Bind run
+  PlayerInputComponent->BindAction("Run", IE_Pressed, this, &ABlankChar::StartRun);
+  PlayerInputComponent->BindAction("Run", IE_Released, this, &ABlankChar::StopRun);
+
+  // Bind fly toggle
+  PlayerInputComponent->BindAction("Fly", IE_Pressed, this, &ABlankChar::ToggleFly);
+
   // Bind movement events
   PlayerInputComponent->BindAxis("MoveForward", this, &ABlankChar::MoveForward);
   PlayerInputComponent->BindAxis("MoveRight", this, &ABlankChar::MoveRight);
+  PlayerInputComponent->BindAxis("MoveUp", this, &ABlankChar::MoveUp);
 
   // Bind camera events
   PlayerInputComponent->BindAxis("Turn", this, &ABlankChar::Turn);
@@ -383,12 +391,18 @@ void ABlankChar::MoveForward(float Value) {
   if ((Controller != nullptr) && (Value != 0.0f)) {
     // find out which way is forward
     const FRotator Rotation = Controller->GetControlRotation();
-    const FRotator YawRotation(0, Rotation.Yaw, 0);
 
-    // get forward vector
-    const FVector Direction =
-        FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
-    AddMovementInput(Direction, Value);
+    if (GetCharacterMovement()->IsFlying()) {
+      // In flight, move in the looking direction
+      const FVector Direction = Rotation.Vector();
+      AddMovementInput(Direction, Value);
+    } else {
+      // On ground, move horizontally
+      const FRotator YawRotation(0, Rotation.Yaw, 0);
+      const FVector Direction =
+          FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
+      AddMovementInput(Direction, Value);
+    }
   }
 }
 
@@ -406,6 +420,12 @@ void ABlankChar::MoveRight(float Value) {
   }
 }
 
+void ABlankChar::MoveUp(float Value) {
+  if (Value != 0.0f) {
+    AddMovementInput(FVector::UpVector, Value);
+  }
+}
+
 void ABlankChar::Turn(float Value) { AddControllerYawInput(Value); }
 
 void ABlankChar::LookUp(float Value) { AddControllerPitchInput(Value); }
@@ -414,5 +434,37 @@ void ABlankChar::ZoomCamera(float Value) {
   if (Value != 0.0f && CameraBoom) {
     float NewLength = CameraBoom->TargetArmLength - (Value * 50.0f);
     CameraBoom->TargetArmLength = FMath::Clamp(NewLength, 150.0f, 3000.0f);
+  }
+}
+
+void ABlankChar::StartRun() {
+  if (bIsRunning) return;
+  bIsRunning = true;
+
+  if (GetCharacterMovement()) {
+    CachedWalkSpeed = GetCharacterMovement()->MaxWalkSpeed;
+    CachedFlySpeed = GetCharacterMovement()->MaxFlySpeed;
+    GetCharacterMovement()->MaxWalkSpeed = CachedWalkSpeed * RunSpeedMultiplier;
+    GetCharacterMovement()->MaxFlySpeed = CachedFlySpeed * RunSpeedMultiplier;
+  }
+}
+
+void ABlankChar::StopRun() {
+  if (!bIsRunning) return;
+  bIsRunning = false;
+
+  if (GetCharacterMovement()) {
+    GetCharacterMovement()->MaxWalkSpeed = CachedWalkSpeed;
+    GetCharacterMovement()->MaxFlySpeed = CachedFlySpeed;
+  }
+}
+
+void ABlankChar::ToggleFly() {
+  if (GetCharacterMovement()) {
+    if (GetCharacterMovement()->MovementMode == MOVE_Walking) {
+      GetCharacterMovement()->SetMovementMode(MOVE_Flying);
+    } else {
+      GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+    }
   }
 }

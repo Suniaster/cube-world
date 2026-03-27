@@ -33,6 +33,9 @@ protected:
 	/** Called for side to side input */
 	void MoveRight(float Value);
 
+	/** Called for vertical input (flight) */
+	void MoveUp(float Value);
+
 	/** Called for yaw (turn) input */
 	void Turn(float Value);
 
@@ -55,7 +58,12 @@ protected:
 	void UpdateRollPose(float DeltaTime);
 	void ApplyProceduralPose(float DeltaTime);
 
-	// Target procedural poses
+	// Running & Flying
+	void StartRun();
+	void StopRun();
+	void ToggleFly();
+
+protected:	// Target procedural poses
 	FRotator TargetHeadRot;
 	FRotator TargetTorsoRot;
 	FRotator TargetHandR_Rot;
@@ -73,13 +81,11 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Procedural Animation")
 	float WalkAnimSpeed = 2.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Procedural Animation")
-	float MaxWalkAngle = 25.0f;
-
 	float WalkTimer = 0.0f;
 
-	// Roll state
+	// Movement state
 	bool bIsRolling = false;
+	bool bIsRunning = false;
 	float RollTimer = 0.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Procedural Animation")
@@ -88,7 +94,11 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Procedural Animation")
 	float RollSpeedMultiplier = 2.f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Procedural Animation")
+	float RunSpeedMultiplier = 10.0f;
+
 	float CachedWalkSpeed = 0.0f;
+	float CachedFlySpeed = 0.0f;
 
 	/** Height of the torso pivot above the mesh origin (feet). Adjust to match skeleton. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Procedural Animation")
