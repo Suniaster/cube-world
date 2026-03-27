@@ -20,3 +20,6 @@ Whenever implementing logic, creating classes, handling game mechanics, or build
 - If a fix feels hacky: know everything you know, implement the elegant solution
 - Skip this for simple, obvious fixes — don't over-engineer
 - Challenge your own work before presenting it
+
+## 4. Review implementation
+- Always look back at new code to remove unused parts, ensure quality, remove unecesary comments.
