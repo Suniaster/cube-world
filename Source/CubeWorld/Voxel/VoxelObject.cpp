@@ -250,7 +250,7 @@ void UVoxelObject::GenerateMeshData(const FVoxelGrid3D& Grid, float VoxelSize, T
 	}
 }
 
-UProceduralMeshComponent* UVoxelObject::Spawn(AActor* Owner, UMaterialInterface* Material)
+UProceduralMeshComponent* UVoxelObject::Spawn(AActor* Owner, UMaterialInterface* Material, bool bCreateCollision)
 {
 	if (!Owner) return nullptr;
 
@@ -270,6 +270,7 @@ UProceduralMeshComponent* UVoxelObject::Spawn(AActor* Owner, UMaterialInterface*
 		}
 		
 		MeshComponent->bUseComplexAsSimpleCollision = true;
+		MeshComponent->bUseAsyncCooking = true; // Offload Physic/Chaos baking to background threads
 	}
 
 	TArray<FVector2D> EmptyUVs;
@@ -283,7 +284,7 @@ UProceduralMeshComponent* UVoxelObject::Spawn(AActor* Owner, UMaterialInterface*
 		EmptyUVs,
 		MeshData.Colors,
 		EmptyTangents,
-		true);
+		bCreateCollision);
 
 	// ── MEMORY OPTIMIZATION ──
 	// ProceduralMeshComponent already copied the data. 

@@ -61,7 +61,7 @@ public:
 
 	/** Spawns or updates a procedural mesh component on the target actor. */
 	UFUNCTION(BlueprintCallable, Category = "Voxel")
-	UProceduralMeshComponent* Spawn(AActor* Owner, UMaterialInterface* Material);
+	UProceduralMeshComponent* Spawn(AActor* Owner, UMaterialInterface* Material, bool bCreateCollision = true);
 
 	/** Returns the stored mesh data (const). */
 	const FVoxelMeshData& GetMeshData() const { return MeshData; }

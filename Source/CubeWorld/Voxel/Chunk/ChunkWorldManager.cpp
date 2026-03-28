@@ -215,9 +215,12 @@ void AChunkWorldManager::UpdateChunksAroundPlayer(FIntPoint PlayerChunk)
 	{
 		if (!DesiredColumns.Contains(ColumnWorkQueue[i]))
 		{
-			ColumnWorkQueue.RemoveAt(i);
+			ColumnWorkQueue.RemoveAtSwap(i, EAllowShrinking::No);
 		}
 	}
+
+	// Build a fast lookup set for O(1) checks during the DesiredColumns iteration
+	TSet<FIntPoint> WorkQueueSet(ColumnWorkQueue);
 
 	// 3. For each desired column, compute LOD and queue if needed
 	for (FIntPoint Coord : DesiredColumns)
@@ -227,10 +230,11 @@ void AChunkWorldManager::UpdateChunksAroundPlayer(FIntPoint PlayerChunk)
 		bool bNew = !LoadedColumns.Contains(Coord);
 		bool bLODChanged = LoadedColumns.Contains(Coord) && ColumnLODs.FindRef(Coord) != TargetLOD;
 
-		if ((bNew || bLODChanged) && !ColumnWorkQueue.Contains(Coord))
+		if ((bNew || bLODChanged) && !WorkQueueSet.Contains(Coord))
 		{
 			ColumnLODs.Add(Coord, TargetLOD);
 			ColumnWorkQueue.Add(Coord);
+			WorkQueueSet.Add(Coord);
 		}
 	}
 
@@ -259,24 +263,16 @@ int32 AChunkWorldManager::CalculateLODForColumn(FIntPoint ColumnCoord, FIntPoint
 
 void AChunkWorldManager::UnloadChunkColumn(FIntPoint Coord)
 {
-	// Remove all vertical chunks for this XY column
-	TArray<FIntVector> ToRemove;
-	for (auto& Pair : LoadedChunks)
+	// Remove all vertical chunks for this XY column via O(1) targeted lookups (Max Z bounded safely to 128)
+	for (int32 Z = 0; Z < 128; ++Z)
 	{
-		if (Pair.Key.X == Coord.X && Pair.Key.Y == Coord.Y)
-		{
-			ToRemove.Add(Pair.Key);
-		}
-	}
-
-	for (const FIntVector& Key : ToRemove)
-	{
+		FIntVector Key(Coord.X, Coord.Y, Z);
 		AWorldChunk** Found = LoadedChunks.Find(Key);
 		if (Found && *Found)
 		{
 			(*Found)->Destroy();
+			LoadedChunks.Remove(Key);
 		}
-		LoadedChunks.Remove(Key);
 	}
 	InFlightTasks.Remove(Coord);
 

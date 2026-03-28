@@ -52,7 +52,8 @@ void AWorldChunk::ApplyGeneratedMesh(const FIntVector& InKey, const FVoxelMeshDa
 		}
 	}
 
-	VoxelObject->Spawn(this, DynMaterial ? (UMaterialInterface*)DynMaterial : InMaterial);
+	bool bCreateCollision = (LODLevel == 0);
+	VoxelObject->Spawn(this, DynMaterial ? (UMaterialInterface*)DynMaterial : InMaterial, bCreateCollision);
 
 	// LOD 0 needs collision for gameplay; distant LOD chunks skip it to save physics overhead.
 	if (VoxelObject->GetMeshComponent())
