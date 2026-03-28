@@ -82,9 +82,10 @@ void AChunkWorldManager::Tick(float DeltaTime)
 		UpdateChunksAroundPlayer(CurrentChunk);
 	}
 
-	// ── Process the Column Work Queue (Budgeted) ──
+	// ── Process the Column Work Queue (Thread Dispatch) ──
 	int32 JobsProcessed = 0;
-	while (ColumnWorkQueue.Num() > 0 && JobsProcessed < MaxChunksPerFrame)
+	int32 MaxConcurrentTasks = 64; // CPU core thread scale saturation point
+	while (ColumnWorkQueue.Num() > 0 && InFlightTasks.Num() < MaxConcurrentTasks && JobsProcessed < FMath::Max(MaxChunksPerFrame * 4, 20))
 	{
 		FIntPoint Coord = ColumnWorkQueue[0];
 		ColumnWorkQueue.RemoveAt(0);
@@ -105,17 +106,18 @@ void AChunkWorldManager::Tick(float DeltaTime)
 	// ── Process Finished Tasks (Budgeted GPU Uploads) ──
 	int32 UploadsThisFrame = 0;
 	FChunkGenerationResult FinishedResult;
-	while (FinishedTasksQueue.Dequeue(FinishedResult) && UploadsThisFrame < MaxChunksPerFrame)
+	while (UploadsThisFrame < MaxChunksPerFrame && FinishedTasksQueue.Dequeue(FinishedResult))
 	{
 		FIntVector Key(FinishedResult.ChunkCoord.X, FinishedResult.ChunkCoord.Y, FinishedResult.ZLayer);
 
 		// If a newer LOD task was dispatched, this result is stale — discard it.
-		int32* InFlightLOD = InFlightTasks.Find(Key);
+		int32* InFlightLOD = InFlightTasks.Find(FinishedResult.ChunkCoord);
 		if (InFlightLOD && *InFlightLOD != FinishedResult.LODLevel)
 		{
 			continue;
 		}
-		InFlightTasks.Remove(Key);
+		// Safely clear the tracking flag as the column is now delivering results
+		InFlightTasks.Remove(FinishedResult.ChunkCoord);
 
 		// If column was unloaded or LOD changed since task started, discard
 		if (!LoadedColumns.Contains(FinishedResult.ChunkCoord) || 
@@ -275,8 +277,8 @@ void AChunkWorldManager::UnloadChunkColumn(FIntPoint Coord)
 			(*Found)->Destroy();
 		}
 		LoadedChunks.Remove(Key);
-		InFlightTasks.Remove(Key);
 	}
+	InFlightTasks.Remove(Coord);
 
 	LoadedColumns.Remove(Coord);
 	ColumnLODs.Remove(Coord);
@@ -286,36 +288,22 @@ void AChunkWorldManager::DispatchChunkTasks(FIntPoint Coord, int32 LODLevel)
 {
 	EnsureMaterial();
 
-	float MaxAmplitude = 1.0f;
-	for (const FVoxelBiomeParams& B : Biomes)
-	{
-		MaxAmplitude = FMath::Max(MaxAmplitude, B.Amplitude);
-	}
-	int32 MaxZLayers = FMath::CeilToInt32(MaxAmplitude / static_cast<float>(ChunkHeight));
-	MaxZLayers = FMath::Max(MaxZLayers, 1);
+	// Skip if a column async task at the same LOD is already in flight
+	int32* ExistingLOD = InFlightTasks.Find(Coord);
+	if (ExistingLOD && *ExistingLOD == LODLevel) return;
 
-	for (int32 Z = 0; Z < MaxZLayers; ++Z)
-	{
-		FIntVector ChunkKey(Coord.X, Coord.Y, Z);
+	InFlightTasks.Add(Coord, LODLevel);
 
-		// Skip if an async task at the same LOD is already in flight
-		int32* ExistingLOD = InFlightTasks.Find(ChunkKey);
-		if (ExistingLOD && *ExistingLOD == LODLevel) continue;
-
-		InFlightTasks.Add(ChunkKey, LODLevel);
-
-		(new FAutoDeleteAsyncTask<FChunkGenerationTask>(
-			Coord,
-			Z,
-			ChunkSize,
-			ChunkHeight,
-			VoxelSize,
-			LODLevel,
-			BiomeCellSize,
-			Seed,
-			Biomes,
-			BiomeBlendWidth,
-			&FinishedTasksQueue
-		))->StartBackgroundTask();
-	}
+	(new FAutoDeleteAsyncTask<FChunkGenerationTask>(
+		Coord,
+		ChunkSize,
+		ChunkHeight,
+		VoxelSize,
+		LODLevel,
+		BiomeCellSize,
+		Seed,
+		Biomes,
+		BiomeBlendWidth,
+		&FinishedTasksQueue
+	))->StartBackgroundTask();
 }

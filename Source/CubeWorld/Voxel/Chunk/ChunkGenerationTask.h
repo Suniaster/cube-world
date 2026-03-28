@@ -30,7 +30,6 @@ class FChunkGenerationTask : public FNonAbandonableTask
 public:
 	FChunkGenerationTask(
 		FIntPoint InChunkCoord,
-		int32 InZLayer,
 		int32 InChunkSize,
 		int32 InChunkHeight,
 		float InVoxelSize,
@@ -41,7 +40,6 @@ public:
 		float InBlendWidth,
 		TQueue<FChunkGenerationResult, EQueueMode::Mpsc>* InResultQueue)
 		: ChunkCoord(InChunkCoord)
-		, ZLayer(InZLayer)
 		, ChunkSize(InChunkSize)
 		, ChunkHeight(InChunkHeight)
 		, VoxelSize(InVoxelSize)
@@ -62,7 +60,6 @@ public:
 
 private:
 	FIntPoint ChunkCoord;
-	int32 ZLayer;
 	int32 ChunkSize;
 	int32 ChunkHeight;
 	float VoxelSize;

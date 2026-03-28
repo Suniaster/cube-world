@@ -76,31 +76,55 @@ struct CUBEWORLD_API FVoxelTerrainNoise
 		float Seed,
 		int32 BiomeCount);
 
+	// ── Cached Biome Smoothing ────────────────────────────────────────────────
+	
+	/** A cached feature point representing a physical biome peak in a single cellular cell. */
+	struct FWorleyFeaturePoint
+	{
+		float X;
+		float Y;
+		EVoxelBiome Biome;
+	};
+
+	/** A cached container of the 9 nearest cellular points for an entire chunk region. */
+	struct FCachedWorleyPoints
+	{
+		TArray<FWorleyFeaturePoint, TInlineAllocator<9>> Points;
+	};
+
 	/**
-	 * Worley noise with multi-biome weights: returns all biomes within the blend range
-	 * and their weights. Prevents "pops" when the 2nd closest biome changes.
-	 *
-	 * @param WorldX     X coordinate in world space
-	 * @param WorldY     Y coordinate in world space
-	 * @param CellSize   World-space size of each Worley cell
-	 * @param Seed       World seed
-	 * @param BiomeCount Number of biomes
-	 * @param BlendWidth Fraction of cell size over which blending occurs (0-1).
-	 * @return FBiomeWeightInfo with a map of biomes and their weights.
+	 * Computes all 9 nearest neighboring Worley feature points exactly once purely based on origin X/Y.
 	 */
-	static FBiomeWeightInfo GetBiomeWeights(
+	static FCachedWorleyPoints GetCachedWorleyPoints(
 		float WorldX,
 		float WorldY,
 		float CellSize,
 		float Seed,
-		int32 BiomeCount,
+		int32 BiomeCount);
+
+	/**
+	 * Worley noise with multi-biome weights using only exact cached points instead of raw seeded recalculations.
+	 * and their weights. Prevents "pops" when the 2nd closest biome changes.
+	 *
+	 * @param CellX        Voxel X position relative to cell size (WorldX / CellSize)
+	 * @param CellY        Voxel Y position relative to cell size (WorldY / CellSize)
+	 * @param CachedPoints Pre-calculated 3x3 Worley neighbor map for the entire chunk
+	 * @param BlendWidth   Fraction of cell size over which blending occurs (0-1).
+	 * @return FBiomeWeightInfo with a map of biomes and their weights.
+	 */
+	static FBiomeWeightInfo GetBiomeWeights(
+		float CellX,
+		float CellY,
+		const FCachedWorleyPoints& CachedPoints,
 		float BlendWidth);
 
 	/**
 	 * Computes the final blended terrain height for a given world position.
 	 * Encapsulates both biome lookup and height blending.
 	 *
-	 * @param OutWeights  Returns the biome weights used for this location (useful for coloring).
+	 * @param OutPrimaryBiome  Returns the dominant biome (for block generation).
+	 * @param OutColor         Returns the pre-blended mesh vertex color.
+	 * @param CachedPoints     Pre-calculated Worley points
 	 * @return Final height in voxel columns (clamped to >= 1).
 	 */
 	static int32 GetWeightedHeightForLocation(
@@ -110,7 +134,9 @@ struct CUBEWORLD_API FVoxelTerrainNoise
 		float Seed,
 		const TArray<FVoxelBiomeParams>& Biomes,
 		float BlendWidth,
-		FBiomeWeightInfo& OutWeights);
+		const FCachedWorleyPoints& CachedPoints,
+		uint8& OutPrimaryBiome,
+		FColor& OutColor);
 
 
 private:

@@ -139,35 +139,57 @@ EVoxelBiome FVoxelTerrainNoise::GetBiomeAt(
 	return ClosestBiome;
 }
 
-// ── Worley noise with biome blending ────────────────────────────────────────
+// ── Cached Biome Smoothing ────────────────────────────────────────────────
 
-
-FBiomeWeightInfo FVoxelTerrainNoise::GetBiomeWeights(
+FVoxelTerrainNoise::FCachedWorleyPoints FVoxelTerrainNoise::GetCachedWorleyPoints(
 	float WorldX,
 	float WorldY,
 	float CellSize,
 	float Seed,
-	int32 BiomeCount,
-	float BlendWidth)
+	int32 BiomeCount)
 {
 	float CellX = WorldX / CellSize;
 	float CellY = WorldY / CellSize;
 	int32 CellIX = FMath::FloorToInt32(CellX);
 	int32 CellIY = FMath::FloorToInt32(CellY);
 
-	// First pass: find the absolute closest feature point distance (D1)
-	float MinDistSq = TNumericLimits<float>::Max();
+	FVoxelTerrainNoise::FCachedWorleyPoints Cached;
+
 	for (int32 DX = -1; DX <= 1; ++DX)
 	{
 		for (int32 DY = -1; DY <= 1; ++DY)
 		{
 			int32 NX = CellIX + DX;
 			int32 NY = CellIY + DY;
+
 			float JitterX = Hash2D(NX, NY, Seed);
 			float JitterY = Hash2D(NX + 1000, NY + 1000, Seed);
-			float DistSq = FVector2D::DistSquared(FVector2D(CellX, CellY), FVector2D(NX + JitterX, NY + JitterY));
-			MinDistSq = FMath::Min(MinDistSq, DistSq);
+			float FeatureX = static_cast<float>(NX) + JitterX;
+			float FeatureY = static_cast<float>(NY) + JitterY;
+
+			float BiomeHash = Hash2D(NX + 2000, NY + 2000, Seed);
+			int32 BiomeIdx = FMath::Clamp(FMath::FloorToInt32(BiomeHash * BiomeCount), 0, BiomeCount - 1);
+			EVoxelBiome Biome = static_cast<EVoxelBiome>(BiomeIdx + 1);
+
+			Cached.Points.Add({FeatureX, FeatureY, Biome});
 		}
+	}
+
+	return Cached;
+}
+
+FBiomeWeightInfo FVoxelTerrainNoise::GetBiomeWeights(
+	float CellX,
+	float CellY,
+	const FCachedWorleyPoints& CachedPoints,
+	float BlendWidth)
+{
+	// First pass: find the absolute closest feature point distance (D1)
+	float MinDistSq = TNumericLimits<float>::Max();
+	for (const FWorleyFeaturePoint& Point : CachedPoints.Points)
+	{
+		float DistSq = FVector2D::DistSquared(FVector2D(CellX, CellY), FVector2D(Point.X, Point.Y));
+		MinDistSq = FMath::Min(MinDistSq, DistSq);
 	}
 
 	float D1 = FMath::Sqrt(MinDistSq);
@@ -175,31 +197,23 @@ FBiomeWeightInfo FVoxelTerrainNoise::GetBiomeWeights(
 	float TotalWeight = 0.0f;
 
 	// Second pass: accumulate weights for all points within (D1 + BlendWidth)
-	for (int32 DX = -1; DX <= 1; ++DX)
+	for (const FWorleyFeaturePoint& Point : CachedPoints.Points)
 	{
-		for (int32 DY = -1; DY <= 1; ++DY)
+		float DistSq = FVector2D::DistSquared(FVector2D(CellX, CellY), FVector2D(Point.X, Point.Y));
+		float Di = FMath::Sqrt(DistSq);
+
+		float Diff = Di - D1;
+		if (Diff < BlendWidth)
 		{
-			int32 NX = CellIX + DX;
-			int32 NY = CellIY + DY;
-			float JitterX = Hash2D(NX, NY, Seed);
-			float JitterY = Hash2D(NX + 1000, NY + 1000, Seed);
-			float DistSq = FVector2D::DistSquared(FVector2D(CellX, CellY), FVector2D(NX + JitterX, NY + JitterY));
-			float Di = FMath::Sqrt(DistSq);
+			// Basic linear weight that goes to zero exactly at BlendWidth distance from D1
+			float T = 1.0f - FMath::Clamp(Diff / (BlendWidth + SMALL_NUMBER), 0.0f, 1.0f);
+			// Cubic smoothstep for a softer transition
+			float Weight = T * T * (3.0f - 2.0f * T);
 
-			float Diff = Di - D1;
-			if (Diff < BlendWidth)
+			uint8 BiomeIdx = static_cast<uint8>(Point.Biome);
+			if (BiomeIdx < 4)
 			{
-				float BiomeHash = Hash2D(NX + 2000, NY + 2000, Seed);
-				int32 BiomeIdx = FMath::Clamp(FMath::FloorToInt32(BiomeHash * BiomeCount), 0, BiomeCount - 1);
-				EVoxelBiome Biome = static_cast<EVoxelBiome>(BiomeIdx + 1);
-
-				// Basic linear weight that goes to zero exactly at BlendWidth distance from D1
-				float T = 1.0f - FMath::Clamp(Diff / (BlendWidth + SMALL_NUMBER), 0.0f, 1.0f);
-				// Cubic smoothstep for a softer transition
-				float Weight = T * T * (3.0f - 2.0f * T);
-
-				float& ExistingWeight = Result.Weights.FindOrAdd(Biome);
-				ExistingWeight += Weight;
+				Result.Weights[BiomeIdx] += Weight;
 				TotalWeight += Weight;
 			}
 		}
@@ -208,15 +222,15 @@ FBiomeWeightInfo FVoxelTerrainNoise::GetBiomeWeights(
 	// Normalize
 	if (TotalWeight > SMALL_NUMBER)
 	{
-		for (auto& Pair : Result.Weights)
+		for (int32 i = 0; i < 4; ++i)
 		{
-			Pair.Value /= TotalWeight;
+			Result.Weights[i] /= TotalWeight;
 		}
 	}
 	else
 	{
 		// Fallback (this shouldn't happen)
-		Result.Weights.Add(EVoxelBiome::ForestPlains, 1.0f);
+		Result.Weights[static_cast<uint8>(EVoxelBiome::ForestPlains)] = 1.0f;
 	}
 
 	return Result;
@@ -229,17 +243,39 @@ int32 FVoxelTerrainNoise::GetWeightedHeightForLocation(
 	float Seed,
 	const TArray<FVoxelBiomeParams>& Biomes,
 	float BlendWidth,
-	FBiomeWeightInfo& OutWeights)
+	const FCachedWorleyPoints& CachedPoints,
+	uint8& OutPrimaryBiome,
+	FColor& OutColor)
 {
-	OutWeights = GetBiomeWeights(WorldX, WorldY, BiomeCellSize, Seed, Biomes.Num(), BlendWidth);
+	float CellX = WorldX / BiomeCellSize;
+	float CellY = WorldY / BiomeCellSize;
+	
+	FBiomeWeightInfo OutWeights = GetBiomeWeights(CellX, CellY, CachedPoints, BlendWidth);
 
 	float H = 0.0f;
-	for (const auto& Pair : OutWeights.Weights)
+	float MaxWeight = -1.0f;
+	FLinearColor FinalColor(0,0,0,0);
+
+	// Start at 1 to skip 'None' bounds
+	for (int32 i = 1; i < 4; ++i)
 	{
-		int32 BIdx = FMath::Clamp(static_cast<int32>(Pair.Key) - 1, 0, Biomes.Num() - 1);
-		float BiomeH = GetHeightForBiomeFloat(WorldX, WorldY, Biomes[BIdx], Seed);
-		H += BiomeH * Pair.Value;
+		float W = OutWeights.Weights[i];
+		if (W > 0.0f)
+		{
+			// Safe biomes array mapping
+			int32 BIdx = FMath::Clamp(i - 1, 0, Biomes.Num() - 1);
+			float BiomeH = GetHeightForBiomeFloat(WorldX, WorldY, Biomes[BIdx], Seed);
+			H += BiomeH * W;
+			FinalColor += FLinearColor(Biomes[BIdx].Color) * W;
+
+			if (W > MaxWeight)
+			{
+				MaxWeight = W;
+				OutPrimaryBiome = static_cast<uint8>(i);
+			}
+		}
 	}
 
+	OutColor = FinalColor.ToFColor(true);
 	return FMath::Max(FMath::RoundToInt32(H), 1);
 }

@@ -41,7 +41,7 @@ protected:
 
 	/** How many chunks around the player to keep loaded (Chebyshev radius). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Chunks")
-	int32 RenderDistance = 32;
+	int32 RenderDistance = 64;
 
 	// ── LOD distance control ────────────────────────────────────────────
 
@@ -59,7 +59,7 @@ protected:
 
 	/** World-space size of a Worley cell. Controls how large biome regions are. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Biomes")
-	float BiomeCellSize = 100000.0f;
+	float BiomeCellSize = 1000000.0f;
 
 	/** Per-biome noise and visual parameters. Index 0 = SnowMountains, 1 = ForestPlains, 2 = Desert. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Biomes")
@@ -88,8 +88,8 @@ private:
 	/** Set of XY columns that have been loaded (all their vertical chunks). */
 	TSet<FIntPoint> LoadedColumns;
 
-	/** Set of chunk keys that have an async generation task in flight, mapped to the LOD level of the task. */
-	TMap<FIntVector, int32> InFlightTasks;
+	/** Set of XY columns that have an async generation task in flight, mapped to the LOD level of the task. */
+	TMap<FIntPoint, int32> InFlightTasks;
 
 	/** Queue of completed async generation results. */
 	TQueue<FChunkGenerationResult, EQueueMode::Mpsc> FinishedTasksQueue;

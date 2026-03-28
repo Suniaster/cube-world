@@ -63,9 +63,16 @@ struct FBiomeWeightInfo
 {
 	GENERATED_BODY()
 
-	/** Map of biome type to its influence weight (0.0 to 1.0). */
-	UPROPERTY(BlueprintReadWrite, Category = "Voxel")
-	TMap<EVoxelBiome, float> Weights;
+	/** Fixed array of biome weights, indexed by (uint8)EVoxelBiome to bypass dynamic allocations. Supports 0 to 3. */
+	float Weights[4];
+
+	FBiomeWeightInfo()
+	{
+		Weights[0] = 0.0f;
+		Weights[1] = 0.0f;
+		Weights[2] = 0.0f;
+		Weights[3] = 0.0f;
+	}
 };
 
 
@@ -79,7 +86,7 @@ inline TArray<FVoxelBiomeParams> GetDefaultBiomeParams()
 	Defaults[0].Name        = TEXT("Snow Mountains");
 	Defaults[0].Frequency   = 0.00001f;
 	Defaults[0].Amplitude   = 6000.0f;
-	Defaults[0].Octaves     = 4;
+	Defaults[0].Octaves     = 3;
 	Defaults[0].Persistence = 0.5f;
 	Defaults[0].Lacunarity  = 2.0f;
 	Defaults[0].PowerCurve  = 8.0f;
@@ -87,9 +94,9 @@ inline TArray<FVoxelBiomeParams> GetDefaultBiomeParams()
 
 	// ForestPlains – mostly flat with rare small mountains
 	Defaults[1].Name        = TEXT("Forest Plains");
-	Defaults[1].Frequency   = 0.00002f;
-	Defaults[1].Amplitude   = 1000.0f;
-	Defaults[1].Octaves     = 8;
+	Defaults[1].Frequency   = 0.00003f;
+	Defaults[1].Amplitude   = 2000.0f;
+	Defaults[1].Octaves     = 3;
 	Defaults[1].Persistence = 0.3f;
 	Defaults[1].Lacunarity  = 2.0f;
 	Defaults[1].PowerCurve  = 8.0f;
