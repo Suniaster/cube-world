@@ -24,3 +24,4 @@ Whenever implementing logic, creating classes, handling game mechanics, or build
 ## 4. Review implementation
 - Always look back at new code to remove unused parts, ensure quality, remove unecesary comments.
 - Ensure legacy code is removed.
+- Ensure not used code is removed.

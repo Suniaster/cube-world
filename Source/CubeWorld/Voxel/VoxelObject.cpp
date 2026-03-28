@@ -67,18 +67,6 @@ UVoxelObject::UVoxelObject()
 {
 }
 
-void UVoxelObject::Build(const FVoxelGrid3D& Grid, float VoxelSize)
-{
-	MeshData.Clear();
-	GenerateMeshData(Grid, VoxelSize, [](uint8, const FVector&, const FVector&) { return FColor::White; }, MeshData);
-}
-
-void UVoxelObject::Build(const FVoxelGrid3D& Grid, float VoxelSize, TFunctionRef<FColor(uint8 BlockType, const FVector& Pos, const FVector& Normal)> ColorFunc)
-{
-	MeshData.Clear();
-	GenerateMeshData(Grid, VoxelSize, ColorFunc, MeshData);
-}
-
 void UVoxelObject::GenerateMeshData(const FVoxelGrid3D& Grid, float VoxelSize, TFunctionRef<FColor(uint8 BlockType, const FVector& Pos, const FVector& Normal)> ColorFunc, FVoxelMeshData& OutMeshData)
 {
 	OutMeshData.Clear();

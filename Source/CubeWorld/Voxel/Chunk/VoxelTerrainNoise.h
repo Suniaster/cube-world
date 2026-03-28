@@ -23,25 +23,9 @@ struct CUBEWORLD_API FVoxelTerrainNoise
 	 * @param Seed        World seed offset
 	 * @return Height in voxel columns (always >= 1)
 	 */
-	static int32 GetHeight(
-		float WorldX,
-		float WorldY,
-		float Frequency,
-		float Amplitude,
-		int32 Octaves,
-		float Persistence,
-		float Lacunarity,
-		float Seed);
 
 	/** Computes height as a float (for blending) using the given biome noise parameters. */
 	static float GetHeightForBiomeFloat(
-		float WorldX,
-		float WorldY,
-		const FVoxelBiomeParams& Params,
-		float Seed);
-
-	/** Computes height using the given biome noise parameters. */
-	static int32 GetHeightForBiome(
 		float WorldX,
 		float WorldY,
 		const FVoxelBiomeParams& Params,
@@ -57,24 +41,6 @@ struct CUBEWORLD_API FVoxelTerrainNoise
 		float Persistence,
 		float Lacunarity,
 		float Seed);
-
-	/**
-	 * Worley (cellular) noise: finds the closest feature point in a cell grid.
-	 * Returns the biome assigned to that feature point.
-	 *
-	 * @param WorldX     X coordinate in world space
-	 * @param WorldY     Y coordinate in world space
-	 * @param CellSize   World-space size of each Worley cell (controls biome scale)
-	 * @param Seed       World seed
-	 * @param BiomeCount Number of biomes to distribute across feature points
-	 * @return The biome for this location
-	 */
-	static EVoxelBiome GetBiomeAt(
-		float WorldX,
-		float WorldY,
-		float CellSize,
-		float Seed,
-		int32 BiomeCount);
 
 	// ── Cached Biome Smoothing ────────────────────────────────────────────────
 	
