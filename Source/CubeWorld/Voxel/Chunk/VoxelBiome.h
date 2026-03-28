@@ -77,22 +77,22 @@ inline TArray<FVoxelBiomeParams> GetDefaultBiomeParams()
 
 	// SnowMountains – vast flat snow fields with rare towering peaks
 	Defaults[0].Name        = TEXT("Snow Mountains");
-	Defaults[0].Frequency   = 0.00002f;
-	Defaults[0].Amplitude   = 1500.0f;
-	Defaults[0].Octaves     = 2;
-	Defaults[0].Persistence = 0.25f;
+	Defaults[0].Frequency   = 0.00001f;
+	Defaults[0].Amplitude   = 6000.0f;
+	Defaults[0].Octaves     = 4;
+	Defaults[0].Persistence = 0.5f;
 	Defaults[0].Lacunarity  = 2.0f;
 	Defaults[0].PowerCurve  = 8.0f;
 	Defaults[0].Color       = FColor(230, 240, 255);
 
 	// ForestPlains – mostly flat with rare small mountains
 	Defaults[1].Name        = TEXT("Forest Plains");
-	Defaults[1].Frequency   = 0.0001f;
-	Defaults[1].Amplitude   = 40.0f;
-	Defaults[1].Octaves     = 1;
-	Defaults[1].Persistence = 0.0f;
+	Defaults[1].Frequency   = 0.00002f;
+	Defaults[1].Amplitude   = 1000.0f;
+	Defaults[1].Octaves     = 8;
+	Defaults[1].Persistence = 0.3f;
 	Defaults[1].Lacunarity  = 2.0f;
-	Defaults[1].PowerCurve  = 4.0f;
+	Defaults[1].PowerCurve  = 8.0f;
 	Defaults[1].Color       = FColor(34, 139, 34);
 
 	// Desert – very flat with minimal variation
