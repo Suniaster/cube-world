@@ -21,7 +21,7 @@ Steps to creating the game:
     - Refactored voxel mesh generation into `UVoxelObject` (Done)
     - Refactored voxel system to support block types and dynamic coloring (Done)
     - Reorganized chunk-related code into `Source/CubeWorld/Voxel/Chunk` (Done)
-    - Add some montains
+    - Add some montains (Done)
     - Add props to make the world more vivid (trees)
     - Ensure the artstyle in the world make sense (colors, terrain shape, tree shapes)
     - Create a simple sky
