@@ -22,10 +22,11 @@ Steps to creating the game:
     - Refactored voxel system to support block types and dynamic coloring (Done)
     - Reorganized chunk-related code into `Source/CubeWorld/Voxel/Chunk` (Done)
     - Add some montains (Done)
-    - Add props to make the world more vivid (trees)
-    - Ensure the artstyle in the world make sense (colors, terrain shape, tree shapes)
+    - Optimize triangle count
+        - Remove quads on the chunk border
+    - Add body of water (lakes and rivers)
+    - Add props to make the world more vivid (trees, grass)
     - Create a simple sky
-    - Create areas with biomes (forest, plains, snow)
 - Creating a simple enemy:
     - Only needs simple style
     - Create hp ui's

@@ -119,8 +119,12 @@ void FChunkGenerationTask::DoWork()
 	}
 
 	// ── ZLayer Generation Dispatch ──
-	// Cap absolute height generation structurally 
-	int32 ActiveZLayers = FMath::CeilToInt32(static_cast<float>(AbsoluteMaxHeight) / static_cast<float>(ChunkHeight));
+	// If we have a cached max height from a previous generation of this column, use it
+	// to determine ActiveZLayers immediately rather than deriving it from AbsoluteMaxHeight.
+	// This avoids spawning extra empty Z-layer actors when the column is re-meshed at a
+	// different LOD and the coarser bilinear approximation lands slightly lower.
+	const int32 EffectiveMaxHeight = (MaxHeightHint > 0) ? FMath::Max(AbsoluteMaxHeight, MaxHeightHint) : AbsoluteMaxHeight;
+	int32 ActiveZLayers = FMath::CeilToInt32(static_cast<float>(EffectiveMaxHeight) / static_cast<float>(ChunkHeight));
 	ActiveZLayers = FMath::Clamp(ActiveZLayers, 1, 100);
 
 	for (int32 ZLayerIdx = 0; ZLayerIdx < ActiveZLayers; ++ZLayerIdx)
@@ -142,6 +146,7 @@ void FChunkGenerationTask::DoWork()
 		Result.ChunkCoord = ChunkCoord;
 		Result.ZLayer = ZLayerIdx;
 		Result.LODLevel = LODLevel;
+		Result.ColumnMaxHeight = (ZLayerIdx == 0) ? AbsoluteMaxHeight : 0;
 		Result.bSuccess = true;
 		Result.bHasAnyBlocks = bHasAnyBlocks;
 

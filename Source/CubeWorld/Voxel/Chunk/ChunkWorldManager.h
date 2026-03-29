@@ -98,11 +98,20 @@ private:
 	FIntPoint LastPlayerChunk;
 	bool bHasLastPlayerChunk = false;
 
-	/** Queue of XY column coordinates waiting to be loaded or updated (LOD transition). */
+	/** Priority queue of XY column coordinates waiting to be loaded or updated (LOD transition).
+	 *  Maintained as a binary max-heap: lowest LOD (highest detail) + closest distance at top. */
 	TArray<FIntPoint> ColumnWorkQueue;
-	
+
+	/** Player chunk coord used when the heap was last built; kept stable between rebuilds. */
+	FIntPoint HeapPlayerChunk;
+
 	/** Currently active LOD level per loaded column. */
 	TMap<FIntPoint, int32> ColumnLODs;
+
+	/** Cached full-resolution max terrain height (voxel rows) per XY column.
+	 *  Populated from ZLayer==0 results; used to bound Z-loop iteration on unload
+	 *  and passed as a hint to re-generation tasks on LOD transitions. */
+	TMap<FIntPoint, int32> ColumnMaxHeightCache;
 
 	/** Cached material created at runtime if TerrainMaterial is null. */
 	UPROPERTY()

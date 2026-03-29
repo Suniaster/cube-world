@@ -83,12 +83,22 @@ void AChunkWorldManager::Tick(float DeltaTime)
 	}
 
 	// ── Process the Column Work Queue (Thread Dispatch) ──
+	auto WorkQueueComp = [this](const FIntPoint& A, const FIntPoint& B)
+	{
+		int32 LODA = ColumnLODs.FindRef(A);
+		int32 LODB = ColumnLODs.FindRef(B);
+		if (LODA != LODB) return LODA < LODB;
+		float DistA = FVector2D::DistSquared(FVector2D(A), FVector2D(HeapPlayerChunk));
+		float DistB = FVector2D::DistSquared(FVector2D(B), FVector2D(HeapPlayerChunk));
+		return DistA < DistB;
+	};
+
 	int32 JobsProcessed = 0;
-	int32 MaxConcurrentTasks = 64; // CPU core thread scale saturation point
+	int32 MaxConcurrentTasks = 64;
 	while (ColumnWorkQueue.Num() > 0 && InFlightTasks.Num() < MaxConcurrentTasks && JobsProcessed < FMath::Max(MaxChunksPerFrame * 4, 20))
 	{
-		FIntPoint Coord = ColumnWorkQueue[0];
-		ColumnWorkQueue.RemoveAt(0);
+		FIntPoint Coord = ColumnWorkQueue.HeapTop();
+		ColumnWorkQueue.HeapPopDiscard(WorkQueueComp);
 
 		int32 TargetLOD = ColumnLODs.FindRef(Coord);
 		if (!LoadedColumns.Contains(Coord))
@@ -120,10 +130,17 @@ void AChunkWorldManager::Tick(float DeltaTime)
 		InFlightTasks.Remove(FinishedResult.ChunkCoord);
 
 		// If column was unloaded or LOD changed since task started, discard
-		if (!LoadedColumns.Contains(FinishedResult.ChunkCoord) || 
+		if (!LoadedColumns.Contains(FinishedResult.ChunkCoord) ||
 			ColumnLODs.FindRef(FinishedResult.ChunkCoord) != FinishedResult.LODLevel)
 		{
 			continue;
+		}
+
+		// Update the max-height cache from the ZLayer 0 result (it carries the column's true height).
+		if (FinishedResult.ZLayer == 0 && FinishedResult.ColumnMaxHeight > 0)
+		{
+			int32& Cached = ColumnMaxHeightCache.FindOrAdd(FinishedResult.ChunkCoord);
+			Cached = FMath::Max(Cached, FinishedResult.ColumnMaxHeight);
 		}
 
 		EnsureMaterial();
@@ -186,6 +203,8 @@ FIntPoint AChunkWorldManager::WorldToChunkCoord(const FVector& WorldPos) const
 
 void AChunkWorldManager::UpdateChunksAroundPlayer(FIntPoint PlayerChunk)
 {
+	HeapPlayerChunk = PlayerChunk;
+
 	// 1. Determine which XY columns should be loaded
 	TSet<FIntPoint> DesiredColumns;
 	for (int32 DX = -RenderDistance; DX <= RenderDistance; ++DX)
@@ -226,7 +245,7 @@ void AChunkWorldManager::UpdateChunksAroundPlayer(FIntPoint PlayerChunk)
 	for (FIntPoint Coord : DesiredColumns)
 	{
 		int32 TargetLOD = CalculateLODForColumn(Coord, PlayerChunk);
-		
+
 		bool bNew = !LoadedColumns.Contains(Coord);
 		bool bLODChanged = LoadedColumns.Contains(Coord) && ColumnLODs.FindRef(Coord) != TargetLOD;
 
@@ -238,14 +257,16 @@ void AChunkWorldManager::UpdateChunksAroundPlayer(FIntPoint PlayerChunk)
 		}
 	}
 
-	// Sort work queue: prioritize higher detail (lower LOD) then closer distance
-	ColumnWorkQueue.Sort([this, PlayerChunk](const FIntPoint& A, const FIntPoint& B) {
+	// Rebuild max-heap: lowest LOD (highest detail) + closest distance at the top.
+	// O(n) heapify replaces the previous O(n log n) Sort; between rebuilds each
+	// HeapPopDiscard in Tick costs only O(log n) instead of O(n).
+	ColumnWorkQueue.Heapify([this](const FIntPoint& A, const FIntPoint& B)
+	{
 		int32 LODA = ColumnLODs.FindRef(A);
 		int32 LODB = ColumnLODs.FindRef(B);
 		if (LODA != LODB) return LODA < LODB;
-
-		float DistA = FVector2D::DistSquared(FVector2D(A), FVector2D(PlayerChunk));
-		float DistB = FVector2D::DistSquared(FVector2D(B), FVector2D(PlayerChunk));
+		float DistA = FVector2D::DistSquared(FVector2D(A), FVector2D(HeapPlayerChunk));
+		float DistB = FVector2D::DistSquared(FVector2D(B), FVector2D(HeapPlayerChunk));
 		return DistA < DistB;
 	});
 }
@@ -263,8 +284,13 @@ int32 AChunkWorldManager::CalculateLODForColumn(FIntPoint ColumnCoord, FIntPoint
 
 void AChunkWorldManager::UnloadChunkColumn(FIntPoint Coord)
 {
-	// Remove all vertical chunks for this XY column via O(1) targeted lookups (Max Z bounded safely to 128)
-	for (int32 Z = 0; Z < 128; ++Z)
+	// Use the cached max height to limit the Z scan; fall back to 128 if unknown.
+	const int32 CachedMaxHeight = ColumnMaxHeightCache.FindRef(Coord);
+	const int32 MaxZLayers = (CachedMaxHeight > 0)
+		? FMath::Clamp(FMath::CeilToInt32(static_cast<float>(CachedMaxHeight) / static_cast<float>(ChunkHeight)) + 1, 1, 128)
+		: 128;
+
+	for (int32 Z = 0; Z < MaxZLayers; ++Z)
 	{
 		FIntVector Key(Coord.X, Coord.Y, Z);
 		AWorldChunk** Found = LoadedChunks.Find(Key);
@@ -275,6 +301,7 @@ void AChunkWorldManager::UnloadChunkColumn(FIntPoint Coord)
 		}
 	}
 	InFlightTasks.Remove(Coord);
+	ColumnMaxHeightCache.Remove(Coord);
 
 	LoadedColumns.Remove(Coord);
 	ColumnLODs.Remove(Coord);
@@ -300,6 +327,7 @@ void AChunkWorldManager::DispatchChunkTasks(FIntPoint Coord, int32 LODLevel)
 		Seed,
 		Biomes,
 		BiomeBlendWidth,
-		&FinishedTasksQueue
+		&FinishedTasksQueue,
+		ColumnMaxHeightCache.FindRef(Coord)
 	))->StartBackgroundTask();
 }

@@ -12,12 +12,14 @@ struct FChunkGenerationResult
 	FIntPoint ChunkCoord;
 	int32 ZLayer;
 	int32 LODLevel;
+	/** Full-resolution max terrain height (voxel rows) for this XY column. Only valid on ZLayer == 0. */
+	int32 ColumnMaxHeight;
 	FVoxelMeshData MeshData;
 	bool bHasAnyBlocks;
 	bool bSuccess;
 
 	FChunkGenerationResult()
-		: ChunkCoord(0, 0), ZLayer(0), LODLevel(0), bHasAnyBlocks(false), bSuccess(false)
+		: ChunkCoord(0, 0), ZLayer(0), LODLevel(0), ColumnMaxHeight(0), bHasAnyBlocks(false), bSuccess(false)
 	{}
 };
 
@@ -38,7 +40,8 @@ public:
 		float InSeed,
 		TArray<FVoxelBiomeParams> InBiomes,
 		float InBlendWidth,
-		TQueue<FChunkGenerationResult, EQueueMode::Mpsc>* InResultQueue)
+		TQueue<FChunkGenerationResult, EQueueMode::Mpsc>* InResultQueue,
+		int32 InMaxHeightHint = 0)
 		: ChunkCoord(InChunkCoord)
 		, ChunkSize(InChunkSize)
 		, ChunkHeight(InChunkHeight)
@@ -49,6 +52,7 @@ public:
 		, Biomes(MoveTemp(InBiomes))
 		, BlendWidth(InBlendWidth)
 		, ResultQueue(InResultQueue)
+		, MaxHeightHint(InMaxHeightHint)
 	{}
 
 	FORCEINLINE TStatId GetStatId() const
@@ -70,4 +74,6 @@ private:
 	float BlendWidth;
 
 	TQueue<FChunkGenerationResult, EQueueMode::Mpsc>* ResultQueue;
+	/** Cached full-res max height from a previous generation of this column. 0 = unknown. */
+	int32 MaxHeightHint;
 };
