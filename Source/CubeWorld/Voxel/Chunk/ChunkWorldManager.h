@@ -53,7 +53,17 @@ protected:
 	 *   LOD 3 (eighth):  beyond 3×LODBaseDistance
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|LOD", meta = (ClampMin = "1"))
-	int32 LODBaseDistance = 5;
+	int32 LODBaseDistance = 10;
+
+	/** Number of cells per side for the LOD 3+ heightmap mesh.
+	 *  1 = 1x1 cell = 2 triangles per distant chunk. Max 32. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|LOD", meta = (ClampMin = "1", ClampMax = "32"))
+	int32 HeightmapResolution = 1;
+
+	/** How many LOD-3 chunk columns to merge into a single draw call (per side).
+	 *  8 = 8x8 = 64 columns per actor → ~RenderDistance²/64 draw calls instead of RenderDistance². */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|LOD", meta = (ClampMin = "1", ClampMax = "32"))
+	int32 HeightmapBatchSize = 8;
 
 	// ── Noise parameters ────────────────────────────────────────────────
 
@@ -117,6 +127,25 @@ private:
 	UPROPERTY()
 	UMaterialInterface* CachedRuntimeMaterial;
 
+	// ── LOD 3 Sector Batching ────────────────────────────────────────────
+	// Instead of one actor per LOD-3 column (~14K draw calls), we group
+	// HeightmapBatchSize×HeightmapBatchSize columns into one merged actor.
+
+	struct FHeightmapSector
+	{
+		AWorldChunk* Actor = nullptr;
+		/** Mesh data per column, stored in sector-local space. */
+		TMap<FIntPoint, FVoxelMeshData> ColumnData;
+		/** True when ColumnData changed and the actor needs re-uploading. */
+		bool bDirty = false;
+	};
+
+	/** Live sector state, keyed by sector coordinate (column coord / HeightmapBatchSize). */
+	TMap<FIntPoint, FHeightmapSector> HeightmapSectors;
+
+	/** Maximum number of Z-layers to scan when unloading or processing chunks. */
+	static constexpr int32 MaxZLayersLimit = 128;
+
 	/** Ensures the terrain material is loaded or created. */
 	void EnsureMaterial();
 
@@ -134,4 +163,29 @@ private:
 
 	/** Dispatch async generation tasks for all Z layers of a column at the given LOD. */
 	void DispatchChunkTasks(FIntPoint Coord, int32 LODLevel);
+
+	/** Map a column coordinate to its sector coordinate. */
+	FIntPoint GetSectorCoord(FIntPoint ColCoord) const;
+
+	/** Add/update a column's heightmap data in its sector; marks sector dirty. */
+	void AccumulateHeightmapColumn(FIntPoint ColCoord, FVoxelMeshData&& MeshData);
+
+	/** Remove a column's heightmap data from its sector; marks sector dirty.
+	 *  Destroys the sector actor if no columns remain. */
+	void RemoveColumnFromSector(FIntPoint ColCoord);
+
+	/** Re-upload all dirty sectors in one merged draw call each. */
+	void FlushDirtySectors();
+
+	/** Process the column work queue and dispatch async generation tasks. */
+	void ProcessColumnWorkQueue();
+
+	/** Process finished generation tasks and upload mesh data to GPU. */
+	void ProcessFinishedTasks();
+
+	/** Handle a finished heightmap result (LOD 3+). Returns actors to defer-destroy. */
+	void HandleHeightmapResult(const FChunkGenerationResult& Result, TArray<AWorldChunk*>& OutPendingDestroy);
+
+	/** Handle a finished voxel result (LOD 0-2). Returns true if mesh was uploaded. */
+	bool HandleVoxelResult(const FChunkGenerationResult& Result);
 };

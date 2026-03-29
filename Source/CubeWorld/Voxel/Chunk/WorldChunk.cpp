@@ -56,15 +56,24 @@ void AWorldChunk::ApplyGeneratedMesh(const FIntVector& InKey, const FVoxelMeshDa
 	VoxelObject->Spawn(this, DynMaterial ? (UMaterialInterface*)DynMaterial : InMaterial, bCreateCollision);
 
 	// LOD 0 needs collision for gameplay; distant LOD chunks skip it to save physics overhead.
-	if (VoxelObject->GetMeshComponent())
+	if (UProceduralMeshComponent* MC = VoxelObject->GetMeshComponent())
 	{
 		if (LODLevel == 0)
 		{
-			VoxelObject->GetMeshComponent()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+			MC->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 		}
 		else
 		{
-			VoxelObject->GetMeshComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			MC->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		}
+
+		// LOD 3+ chunks are heightmap-based distant terrain.
+		// Disable all expensive rendering features that are imperceptible at that range.
+		const bool bIsDistant = (LODLevel >= 3);
+		MC->SetCastShadow(!bIsDistant);
+		MC->bCastDynamicShadow                  = !bIsDistant;
+		MC->bAffectDynamicIndirectLighting      = !bIsDistant;
+		MC->bAffectDistanceFieldLighting        = !bIsDistant;
+		MC->bVisibleInRayTracing                = !bIsDistant;
 	}
 }

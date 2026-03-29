@@ -5,6 +5,7 @@
 #include "../VoxelObject.h"
 #include "../VoxelTypes.h"
 #include "VoxelBiome.h"
+#include "VoxelTerrainNoise.h"
 
 /** Result of a background chunk generation task. */
 struct FChunkGenerationResult
@@ -17,9 +18,10 @@ struct FChunkGenerationResult
 	FVoxelMeshData MeshData;
 	bool bHasAnyBlocks;
 	bool bSuccess;
+	bool bIsHeightmap;
 
 	FChunkGenerationResult()
-		: ChunkCoord(0, 0), ZLayer(0), LODLevel(0), ColumnMaxHeight(0), bHasAnyBlocks(false), bSuccess(false)
+		: ChunkCoord(0, 0), ZLayer(0), LODLevel(0), ColumnMaxHeight(0), bHasAnyBlocks(false), bSuccess(false), bIsHeightmap(false)
 	{}
 };
 
@@ -41,7 +43,8 @@ public:
 		TArray<FVoxelBiomeParams> InBiomes,
 		float InBlendWidth,
 		TQueue<FChunkGenerationResult, EQueueMode::Mpsc>* InResultQueue,
-		int32 InMaxHeightHint = 0)
+		int32 InMaxHeightHint = 0,
+		int32 InHeightmapResolution = 4)
 		: ChunkCoord(InChunkCoord)
 		, ChunkSize(InChunkSize)
 		, ChunkHeight(InChunkHeight)
@@ -53,6 +56,7 @@ public:
 		, BlendWidth(InBlendWidth)
 		, ResultQueue(InResultQueue)
 		, MaxHeightHint(InMaxHeightHint)
+		, HeightmapResolution(InHeightmapResolution)
 	{}
 
 	FORCEINLINE TStatId GetStatId() const
@@ -76,4 +80,16 @@ private:
 	TQueue<FChunkGenerationResult, EQueueMode::Mpsc>* ResultQueue;
 	/** Cached full-res max height from a previous generation of this column. 0 = unknown. */
 	int32 MaxHeightHint;
+	/** Number of cells per side for the LOD 3+ heightmap mesh (e.g. 4 = 4x4 = 32 tris). */
+	int32 HeightmapResolution;
+
+	// Helper functions for DoWork()
+	bool GenerateLOD3Heightmap(float ChunkWorldX, float ChunkWorldY, const FVoxelTerrainNoise::FCachedWorleyPoints& CachedPoints);
+	void GenerateBilinearInterpolation(
+		float ChunkWorldX, float ChunkWorldY, int32 EffectiveChunkSize, float EffectiveVoxelSize,
+		const FVoxelTerrainNoise::FCachedWorleyPoints& CachedPoints,
+		TArray<int32>& OutHeightMap, TArray<uint8>& OutBlockTypeMap, TArray<FColor>& OutColorMap, int32& OutAbsoluteMaxHeight);
+	void GenerateVoxelLayers(
+		const TArray<int32>& HeightMap, const TArray<uint8>& BlockTypeMap, const TArray<FColor>& ColorMap,
+		int32 AbsoluteMaxHeight, int32 EffectiveChunkSize, int32 EffectiveChunkHeight, float EffectiveVoxelSize, int32 LODScale);
 };

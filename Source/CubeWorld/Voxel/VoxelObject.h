@@ -53,6 +53,16 @@ public:
 		TFunctionRef<FColor(uint8 BlockType, const FVector& Pos, const FVector& Normal)> ColorFunc,
 		FVoxelMeshData& OutMeshData);
 
+	/** Thread-safe static function to generate mesh data from a heightmap (LOD 3+). */
+	static void GenerateHeightmapMeshData(
+		const TArray<int32>& HeightMap,
+		const TArray<FColor>& ColorMap,
+		int32 GridSizeX,
+		int32 GridSizeY,
+		float EffectiveVoxelSize,
+		float BaseVoxelSize,
+		FVoxelMeshData& OutMeshData);
+
 	/** Spawns or updates a procedural mesh component on the target actor. */
 	UFUNCTION(BlueprintCallable, Category = "Voxel")
 	UProceduralMeshComponent* Spawn(AActor* Owner, UMaterialInterface* Material, bool bCreateCollision = true);

@@ -238,6 +238,63 @@ void UVoxelObject::GenerateMeshData(const FVoxelGrid3D& Grid, float VoxelSize, T
 	}
 }
 
+void UVoxelObject::GenerateHeightmapMeshData(const TArray<int32>& HeightMap, const TArray<FColor>& ColorMap, int32 GridSizeX, int32 GridSizeY, float EffectiveVoxelSize, float BaseVoxelSize, FVoxelMeshData& OutMeshData)
+{
+	OutMeshData.Clear();
+
+	if (GridSizeX <= 0 || GridSizeY <= 0 || HeightMap.Num() == 0) return;
+
+	// Note: GridSizeX and GridSizeY are the count of *cells*.
+	// The HeightMap must have (GridSizeX + 1) * (GridSizeY + 1) elements now for alignment.
+	int32 VertexWidth = GridSizeX + 1;
+	int32 VertexHeight = GridSizeY + 1;
+
+	// 1. Generate Vertices and Colors (GridSize + 1 x GridSize + 1)
+	for (int32 Y = 0; Y < VertexHeight; ++Y)
+	{
+		for (int32 X = 0; X < VertexWidth; ++X)
+		{
+			// Direct access to the (N+1) buffer
+			int32 Idx = X * VertexHeight + Y;
+			if (!HeightMap.IsValidIndex(Idx)) continue;
+
+			float H = static_cast<float>(HeightMap[Idx]); 
+			
+			// Vertex Position: XY is scaled by LOD voxel size, Z is scaled by BASE voxel size.
+			FVector Pos(X * EffectiveVoxelSize, Y * EffectiveVoxelSize, H * BaseVoxelSize);
+			OutMeshData.Vertices.Add(Pos);
+
+			// Colors
+			OutMeshData.Colors.Add(FLinearColor(ColorMap[Idx]));
+		}
+	}
+
+	// 2. Generate Triangles and Normals
+	for (int32 Y = 0; Y < GridSizeY; ++Y)
+	{
+		for (int32 X = 0; X < GridSizeX; ++X)
+		{
+			int32 i0 = X + Y * VertexWidth;
+			int32 i1 = (X + 1) + Y * VertexWidth;
+			int32 i2 = (X + 1) + (Y + 1) * VertexWidth;
+			int32 i3 = X + (Y + 1) * VertexWidth;
+
+			// Triangle 1
+			OutMeshData.Triangles.Add(i0);
+			OutMeshData.Triangles.Add(i2);
+			OutMeshData.Triangles.Add(i1);
+
+			// Triangle 2
+			OutMeshData.Triangles.Add(i0);
+			OutMeshData.Triangles.Add(i3);
+			OutMeshData.Triangles.Add(i2);
+		}
+	}
+
+	// 3. Simple Normal Calculation (Upwards)
+	OutMeshData.Normals.Init(FVector(0, 0, 1), OutMeshData.Vertices.Num());
+}
+
 UProceduralMeshComponent* UVoxelObject::Spawn(AActor* Owner, UMaterialInterface* Material, bool bCreateCollision)
 {
 	if (!Owner) return nullptr;
