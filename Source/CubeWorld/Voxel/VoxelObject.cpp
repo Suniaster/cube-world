@@ -67,7 +67,7 @@ UVoxelObject::UVoxelObject()
 {
 }
 
-void UVoxelObject::GenerateMeshData(const FVoxelGrid3D& Grid, float VoxelSize, TFunctionRef<FColor(uint8 BlockType, const FVector& Pos, const FVector& Normal)> ColorFunc, FVoxelMeshData& OutMeshData)
+void UVoxelObject::GenerateMeshData(const FVoxelGrid3D& Grid, float VoxelSize, TFunctionRef<FColor(uint8 BlockType, const FVector& Pos, const FVector& Normal)> ColorFunc, FVoxelMeshData& OutMeshData, const FVoxelNeighborMasks* NeighborMasks)
 {
 	OutMeshData.Clear();
 
@@ -114,11 +114,31 @@ void UVoxelObject::GenerateMeshData(const FVoxelGrid3D& Grid, float VoxelSize, T
 
 	for (int32 Axis = 0; Axis < 3; ++Axis)
 	{
+		const int32 AxisDim = (Axis == 0 ? GridSize.Z : (Axis == 1 ? GridSize.X : GridSize.Y));
+		
 		for (int32 i = 0; i < AxisSizes[Axis]; ++i)
 		{
 			uint64 Col = AxisCols[Axis][i];
-			ColFaceMasks[Axis][0][i] = Col & ~(Col << 1); // Negative side faces
-			ColFaceMasks[Axis][1][i] = Col & ~(Col >> 1); // Positive side faces
+			uint64 NeighborNegBit = 0;
+			uint64 NeighborPosBit = 0;
+
+			if (NeighborMasks)
+			{
+				const TArray<uint64>& MaskNeg = NeighborMasks->NeighborBits[Axis][0];
+				const TArray<uint64>& MaskPos = NeighborMasks->NeighborBits[Axis][1];
+
+				if (MaskNeg.Num() > (i / 64))
+				{
+					NeighborNegBit = (MaskNeg[i / 64] & (1ULL << (i % 64))) ? 1ULL : 0ULL;
+				}
+				if (MaskPos.Num() > (i / 64))
+				{
+					NeighborPosBit = (MaskPos[i / 64] & (1ULL << (i % 64))) ? 1ULL : 0ULL;
+				}
+			}
+
+			ColFaceMasks[Axis][0][i] = Col & ~(Col << 1 | NeighborNegBit);
+			ColFaceMasks[Axis][1][i] = Col & ~(Col >> 1 | (NeighborPosBit << (AxisDim - 1)));
 		}
 	}
 

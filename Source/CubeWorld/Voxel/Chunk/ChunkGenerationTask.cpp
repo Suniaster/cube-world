@@ -102,20 +102,23 @@ void FChunkGenerationTask::GenerateBilinearInterpolation(
 	const int32 StepX = FMath::Min(InterpolationStep, EffectiveChunkSize);
 	const int32 StepY = FMath::Min(InterpolationStep, EffectiveChunkSize);
 
+	// Expand macro nodes to cover [-Step, Size + Step]
 	const int32 MacroNodesX     = (EffectiveChunkSize / StepX) + 1;
 	const int32 MacroNodesY     = (EffectiveChunkSize / StepY) + 1;
-	const int32 TotalMacroNodes = MacroNodesX * MacroNodesY;
+	
+	// We use an offset of 1 node (Step voxels) to research into negative space
+	auto GetMacroIdx = [&](int32 MX, int32 MY) { return (MX + 1) * (MacroNodesY + 2) + (MY + 1); };
 
 	TArray<float>        MacroHeight;
 	TArray<uint8>        MacroBiome;
 	TArray<FLinearColor> MacroColor;
-	MacroHeight.SetNumUninitialized(TotalMacroNodes);
-	MacroBiome.SetNumUninitialized(TotalMacroNodes);
-	MacroColor.SetNumUninitialized(TotalMacroNodes);
+	MacroHeight.SetNumUninitialized((MacroNodesX + 2) * (MacroNodesY + 2));
+	MacroBiome.SetNumUninitialized((MacroNodesX + 2) * (MacroNodesY + 2));
+	MacroColor.SetNumUninitialized((MacroNodesX + 2) * (MacroNodesY + 2));
 
-	for (int32 MX = 0; MX < MacroNodesX; ++MX)
+	for (int32 MX = -1; MX <= MacroNodesX; ++MX)
 	{
-		for (int32 MY = 0; MY < MacroNodesY; ++MY)
+		for (int32 MY = -1; MY <= MacroNodesY; ++MY)
 		{
 			const float SampleX = ChunkWorldX + (MX * StepX + 0.5f) * EffectiveVoxelSize;
 			const float SampleY = ChunkWorldY + (MY * StepY + 0.5f) * EffectiveVoxelSize;
@@ -125,15 +128,16 @@ void FChunkGenerationTask::GenerateBilinearInterpolation(
 			const int32 H = FVoxelTerrainNoise::GetWeightedHeightForLocation(
 				SampleX, SampleY, BiomeCellSize, Seed, Biomes, BlendWidth, CachedPoints, PrimaryBiome, VoxelColor);
 
-			const int32 MIdx  = MX * MacroNodesY + MY;
+			const int32 MIdx  = GetMacroIdx(MX, MY);
 			MacroHeight[MIdx] = static_cast<float>(H);
 			MacroBiome[MIdx]  = PrimaryBiome;
 			MacroColor[MIdx]  = VoxelColor.ReinterpretAsLinear();
 		}
 	}
 
-	const int32 VertexSize = EffectiveChunkSize + 1;
-	const int32 TotalCells = VertexSize * VertexSize;
+	// Output map is (Size + 2) x (Size + 2) to cover X, Y from -1 to EffectiveChunkSize
+	const int32 MapWidth   = EffectiveChunkSize + 2; 
+	const int32 TotalCells = MapWidth * MapWidth;
 
 	OutHeightMap.SetNumUninitialized(TotalCells);
 	OutBlockTypeMap.SetNumUninitialized(TotalCells);
@@ -141,42 +145,43 @@ void FChunkGenerationTask::GenerateBilinearInterpolation(
 
 	OutAbsoluteMaxHeight = 0;
 
-	int32 ColIndex = 0;
-	for (int32 X = 0; X < VertexSize; ++X)
+	for (int32 X = -1; X <= EffectiveChunkSize; ++X)
 	{
-		const int32 MX0 = FMath::Min(X / StepX, MacroNodesX - 2);
+		const int32 MX0 = FMath::FloorToInt(static_cast<float>(X) / StepX);
 		const int32 MX1 = MX0 + 1;
 		const float TX  = static_cast<float>(X - MX0 * StepX) / static_cast<float>(StepX);
 
-		for (int32 Y = 0; Y < VertexSize; ++Y, ++ColIndex)
+		for (int32 Y = -1; Y <= EffectiveChunkSize; ++Y)
 		{
-			const int32 MY0 = FMath::Min(Y / StepY, MacroNodesY - 2);
+			const int32 MY0 = FMath::FloorToInt(static_cast<float>(Y) / StepY);
 			const int32 MY1 = MY0 + 1;
 			const float TY  = static_cast<float>(Y - MY0 * StepY) / static_cast<float>(StepY);
 
-			const float H00 = MacroHeight[MX0 * MacroNodesY + MY0];
-			const float H10 = MacroHeight[MX1 * MacroNodesY + MY0];
-			const float H01 = MacroHeight[MX0 * MacroNodesY + MY1];
-			const float H11 = MacroHeight[MX1 * MacroNodesY + MY1];
+			const float H00 = MacroHeight[GetMacroIdx(MX0, MY0)];
+			const float H10 = MacroHeight[GetMacroIdx(MX1, MY0)];
+			const float H01 = MacroHeight[GetMacroIdx(MX0, MY1)];
+			const float H11 = MacroHeight[GetMacroIdx(MX1, MY1)];
 			const float H0  = H00 + (H10 - H00) * TX;
 			const float H1  = H01 + (H11 - H01) * TX;
 			const int32 FinalH = FMath::RoundToInt32(H0 + (H1 - H0) * TY);
 
 			const int32 NearestMX  = (TX < 0.5f) ? MX0 : MX1;
 			const int32 NearestMY  = (TY < 0.5f) ? MY0 : MY1;
-			const uint8 FinalBiome = MacroBiome[NearestMX * MacroNodesY + NearestMY];
+			const uint8 FinalBiome = MacroBiome[GetMacroIdx(NearestMX, NearestMY)];
 
-			const FLinearColor C00 = MacroColor[MX0 * MacroNodesY + MY0];
-			const FLinearColor C10 = MacroColor[MX1 * MacroNodesY + MY0];
-			const FLinearColor C01 = MacroColor[MX0 * MacroNodesY + MY1];
-			const FLinearColor C11 = MacroColor[MX1 * MacroNodesY + MY1];
+			const FLinearColor C00 = MacroColor[GetMacroIdx(MX0, MY0)];
+			const FLinearColor C10 = MacroColor[GetMacroIdx(MX1, MY0)];
+			const FLinearColor C01 = MacroColor[GetMacroIdx(MX0, MY1)];
+			const FLinearColor C11 = MacroColor[GetMacroIdx(MX1, MY1)];
 			const FLinearColor C0  = C00 + (C10 - C00) * TX;
 			const FLinearColor C1  = C01 + (C11 - C01) * TX;
 
+			const int32 ColIndex = (X + 1) * MapWidth + (Y + 1);
 			OutHeightMap[ColIndex]     = FinalH;
 			OutBlockTypeMap[ColIndex]  = FinalBiome;
 			OutColorMap[ColIndex]      = (C0 + (C1 - C0) * TY).ToFColor(true);
 
+			// Only track absolute max for internal columns (or include padding, doesn't hurt)
 			if (FinalH > OutAbsoluteMaxHeight) OutAbsoluteMaxHeight = FinalH;
 		}
 	}
@@ -190,22 +195,26 @@ void FChunkGenerationTask::GenerateVoxelLayers(
 	int32 ActiveZLayers = FMath::CeilToInt32(static_cast<float>(EffectiveMaxHeight) / static_cast<float>(ChunkHeight));
 	ActiveZLayers = FMath::Clamp(ActiveZLayers, 1, 100);
 
-	const int32 VertexSize = EffectiveChunkSize + 1;
-	const int32 TotalCells = VertexSize * VertexSize;
+	const int32 MapWidth = EffectiveChunkSize + 2;
 
 	for (int32 ZLayerIdx = 0; ZLayerIdx < ActiveZLayers; ++ZLayerIdx)
 	{
 		const int32 ZBase = ZLayerIdx * ChunkHeight;
 		bool bHasAnyBlocks = false;
 
-		for (int32 i = 0; i < TotalCells; ++i)
+		// Check internal columns for blocks in this Z-layer
+		for (int32 X = 0; X < EffectiveChunkSize; ++X)
 		{
-			if (HeightMap[i] > ZBase)
+			for (int32 Y = 0; Y < EffectiveChunkSize; ++Y)
 			{
-				bHasAnyBlocks = true;
-				break;
+				if (HeightMap[(X + 1) * MapWidth + (Y + 1)] > ZBase)
+				{
+					bHasAnyBlocks = true;
+					goto FoundBlocks;
+				}
 			}
 		}
+	FoundBlocks:
 
 		FChunkGenerationResult Result;
 		Result.ChunkCoord      = ChunkCoord;
@@ -218,13 +227,36 @@ void FChunkGenerationTask::GenerateVoxelLayers(
 		if (bHasAnyBlocks)
 		{
 			FVoxelGrid3D Grid(EffectiveChunkSize, EffectiveChunkSize, EffectiveChunkHeight);
+			
+			// ── NEIGHBOR MASK CALCULATION ──
+			FVoxelNeighborMasks NeighborMasks;
+			int32 AxisSizes[3] = {
+				EffectiveChunkSize * EffectiveChunkSize,			// Z-axis (X * Y)
+				EffectiveChunkSize * EffectiveChunkHeight,			// X-axis (Y * Z)
+				EffectiveChunkHeight * EffectiveChunkSize			// Y-axis (Z * X)
+			};
+
+			for (int32 Axis = 0; Axis < 3; ++Axis)
+			{
+				for (int32 Dir = 0; Dir < 2; ++Dir)
+				{
+					NeighborMasks.NeighborBits[Axis][Dir].SetNumZeroed((AxisSizes[Axis] + 63) / 64);
+				}
+			}
+
+			auto SetNeighborBit = [&](int32 Axis, int32 Dir, int32 BitIdx)
+			{
+				NeighborMasks.NeighborBits[Axis][Dir][BitIdx / 64] |= (1ULL << (BitIdx % 64));
+			};
+
+			// 1. Populate internal grid and Z-neighbor masks
 			for (int32 X = 0; X < EffectiveChunkSize; ++X)
 			{
 				for (int32 Y = 0; Y < EffectiveChunkSize; ++Y)
 				{
-					const int32 GridIdx   = X * VertexSize + Y;
-					const uint8 BlockType = BlockTypeMap[GridIdx];
-					const int32 ColHeight = HeightMap[GridIdx];
+					const int32 MapIdx   = (X + 1) * MapWidth + (Y + 1);
+					const uint8 BlockType = BlockTypeMap[MapIdx];
+					const int32 ColHeight = HeightMap[MapIdx];
 
 					const int32 LimitZ = FMath::Clamp((ColHeight - ZBase + LODScale - 1) / LODScale, 0, EffectiveChunkHeight);
 
@@ -232,17 +264,59 @@ void FChunkGenerationTask::GenerateVoxelLayers(
 					{
 						Grid.SetVoxel(X, Y, LocalZ, BlockType);
 					}
+
+					// Z-neighbor bits
+					const int32 BitIdx = X + Y * EffectiveChunkSize;
+					if (ColHeight >= ZBase) // Solid voxel below at ZBase-1
+					{
+						SetNeighborBit(0, 0, BitIdx);
+					}
+					if (ColHeight >= ZBase + (EffectiveChunkHeight + 1) * LODScale) // Solid voxel above at ZBase + ChunkHeight
+					{
+						SetNeighborBit(0, 1, BitIdx);
+					}
+				}
+			}
+
+			// 2. Populate X-neighbor masks (X=-1 and X=Size)
+			for (int32 Y = 0; Y < EffectiveChunkSize; ++Y)
+			{
+				const int32 H_NegX = HeightMap[0 * MapWidth + (Y + 1)];
+				const int32 H_PosX = HeightMap[(EffectiveChunkSize + 1) * MapWidth + (Y + 1)];
+
+				for (int32 LocalZ = 0; LocalZ < EffectiveChunkHeight; ++LocalZ)
+				{
+					const int32 Threshold = ZBase + (LocalZ * LODScale) + 1;
+					const int32 BitIdx = Y + LocalZ * EffectiveChunkSize;
+					if (H_NegX >= Threshold) SetNeighborBit(1, 0, BitIdx);
+					if (H_PosX >= Threshold) SetNeighborBit(1, 1, BitIdx);
+				}
+			}
+
+			// 3. Populate Y-neighbor masks (Y=-1 and Y=Size)
+			for (int32 X = 0; X < EffectiveChunkSize; ++X)
+			{
+				const int32 H_NegY = HeightMap[(X + 1) * MapWidth + 0];
+				const int32 H_PosY = HeightMap[(X + 1) * MapWidth + (EffectiveChunkSize + 1)];
+
+				for (int32 LocalZ = 0; LocalZ < EffectiveChunkHeight; ++LocalZ)
+				{
+					const int32 Threshold = ZBase + (LocalZ * LODScale) + 1;
+					const int32 BitIdx = LocalZ + X * EffectiveChunkHeight; // Indices must match AxisCols in mesher
+					if (H_NegY >= Threshold) SetNeighborBit(2, 0, BitIdx);
+					if (H_PosY >= Threshold) SetNeighborBit(2, 1, BitIdx);
 				}
 			}
 
 			UVoxelObject::GenerateMeshData(Grid, EffectiveVoxelSize,
-				[&ColorMap, VertexSize, EffectiveVoxelSize](uint8 /*BlockType*/, const FVector& Pos, const FVector& /*Normal*/) -> FColor
+				[&ColorMap, MapWidth, EffectiveVoxelSize](uint8 /*BlockType*/, const FVector& Pos, const FVector& /*Normal*/) -> FColor
 				{
-					const int32 GX = FMath::Clamp(FMath::FloorToInt32(Pos.X / EffectiveVoxelSize), 0, VertexSize - 2);
-					const int32 GY = FMath::Clamp(FMath::FloorToInt32(Pos.Y / EffectiveVoxelSize), 0, VertexSize - 2);
-					return ColorMap[GX * VertexSize + GY];
+					const int32 GX = FMath::Clamp(FMath::FloorToInt32(Pos.X / EffectiveVoxelSize), 0, MapWidth - 3);
+					const int32 GY = FMath::Clamp(FMath::FloorToInt32(Pos.Y / EffectiveVoxelSize), 0, MapWidth - 3);
+					return ColorMap[(GX + 1) * MapWidth + (GY + 1)];
 				},
-				Result.MeshData);
+				Result.MeshData,
+				&NeighborMasks);
 		}
 
 		if (ResultQueue)

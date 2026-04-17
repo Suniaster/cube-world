@@ -51,7 +51,8 @@ public:
 		const FVoxelGrid3D& Grid,
 		float VoxelSize,
 		TFunctionRef<FColor(uint8 BlockType, const FVector& Pos, const FVector& Normal)> ColorFunc,
-		FVoxelMeshData& OutMeshData);
+		FVoxelMeshData& OutMeshData,
+		const FVoxelNeighborMasks* NeighborMasks = nullptr);
 
 	/** Thread-safe static function to generate mesh data from a heightmap (LOD 3+). */
 	static void GenerateHeightmapMeshData(

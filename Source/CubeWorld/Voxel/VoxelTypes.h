@@ -3,6 +3,20 @@
 #include "CoreMinimal.h"
 #include "VoxelTypes.generated.h"
 
+/** Bitmasks for neighboring voxels at chunk boundaries. */
+USTRUCT(BlueprintType)
+struct FVoxelNeighborMasks
+{
+	GENERATED_BODY()
+
+	/** 
+	 * For each axis (0=Z, 1=X, 2=Y) and direction (0=negative, 1=positive),
+	 * an array of uint64s containing one bit per column.
+	 * Total bits per mask = AxisSizes[Axis].
+	 */
+	TArray<uint64> NeighborBits[3][2];
+};
+
 /** Data for a 3D voxel grid. */
 USTRUCT(BlueprintType)
 struct FVoxelGrid3D
