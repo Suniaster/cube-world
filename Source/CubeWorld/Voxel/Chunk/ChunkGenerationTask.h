@@ -16,6 +16,7 @@ struct FChunkGenerationResult
 	/** Full-resolution max terrain height (voxel rows) for this XY column. Only valid on ZLayer == 0. */
 	int32 ColumnMaxHeight;
 	FVoxelMeshData MeshData;
+	FVoxelMeshData WaterMeshData;
 	bool bHasAnyBlocks;
 	bool bSuccess;
 	bool bIsHeightmap;
@@ -43,6 +44,7 @@ public:
 		TArray<FVoxelBiomeParams> InBiomes,
 		float InBlendWidth,
 		TQueue<FChunkGenerationResult, EQueueMode::Mpsc>* InResultQueue,
+		int32 InWaterLevel = 10,
 		int32 InMaxHeightHint = 0,
 		int32 InHeightmapResolution = 4)
 		: ChunkCoord(InChunkCoord)
@@ -55,6 +57,7 @@ public:
 		, Biomes(MoveTemp(InBiomes))
 		, BlendWidth(InBlendWidth)
 		, ResultQueue(InResultQueue)
+		, WaterLevel(InWaterLevel)
 		, MaxHeightHint(InMaxHeightHint)
 		, HeightmapResolution(InHeightmapResolution)
 	{}
@@ -78,6 +81,7 @@ private:
 	float BlendWidth;
 
 	TQueue<FChunkGenerationResult, EQueueMode::Mpsc>* ResultQueue;
+	int32 WaterLevel;
 	/** Cached full-res max height from a previous generation of this column. 0 = unknown. */
 	int32 MaxHeightHint;
 	/** Number of cells per side for the LOD 3+ heightmap mesh (e.g. 4 = 4x4 = 32 tris). */

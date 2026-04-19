@@ -67,25 +67,30 @@ UVoxelObject::UVoxelObject()
 {
 }
 
-void UVoxelObject::GenerateMeshData(const FVoxelGrid3D& Grid, float VoxelSize, TFunctionRef<FColor(uint8 BlockType, const FVector& Pos, const FVector& Normal)> ColorFunc, FVoxelMeshData& OutMeshData, const FVoxelNeighborMasks* NeighborMasks)
+void UVoxelObject::GenerateMeshData(const FVoxelGrid3D& Grid, float VoxelSize, TFunctionRef<FColor(uint8 BlockType, const FVector& Pos, const FVector& Normal)> ColorFunc, FVoxelMeshData& OutSolidMeshData, FVoxelMeshData& OutWaterMeshData, const FVoxelNeighborMasks* NeighborMasks)
 {
-	OutMeshData.Clear();
+	OutSolidMeshData.Clear();
+	OutWaterMeshData.Clear();
 
 	const FIntVector GridSize = Grid.Size;
 	if (GridSize.X <= 0 || GridSize.Y <= 0 || GridSize.Z <= 0) return;
 
 	// 1. Column Mask Generation
-	TArray<uint64> AxisCols[3];
-	const uint64 AXIS_Z = 0;
-	const uint64 AXIS_X = 1;
-	const uint64 AXIS_Y = 2;
+	TArray<uint64> SolidAxisCols[3];
+	TArray<uint64> WaterAxisCols[3];
+	const int32 AXIS_Z = 0;
+	const int32 AXIS_X = 1;
+	const int32 AXIS_Y = 2;
 	TArray<uint64> AxisSizes;
 	AxisSizes.Add(GridSize.X * GridSize.Y); // Z axis 
 	AxisSizes.Add(GridSize.Y * GridSize.Z); // X axis 
 	AxisSizes.Add(GridSize.Z * GridSize.X); // Y axis 
-	AxisCols[AXIS_Z].SetNumZeroed(AxisSizes[AXIS_Z]);
-	AxisCols[AXIS_X].SetNumZeroed(AxisSizes[AXIS_X]);
-	AxisCols[AXIS_Y].SetNumZeroed(AxisSizes[AXIS_Y]);
+	
+	for (int32 i = 0; i < 3; ++i)
+	{
+		SolidAxisCols[i].SetNumZeroed(AxisSizes[i]);
+		WaterAxisCols[i].SetNumZeroed(AxisSizes[i]);
+	}
 
 	for (uint64 Z = 0; Z < GridSize.Z; ++Z)
 	{
@@ -93,11 +98,13 @@ void UVoxelObject::GenerateMeshData(const FVoxelGrid3D& Grid, float VoxelSize, T
 		{
 			for (uint64 X = 0; X < GridSize.X; ++X)
 			{
-				if (Grid.GetVoxel(X, Y, Z) != 0) // New: Check for non-zero block type
+				uint8 BlockType = Grid.GetVoxel(X, Y, Z);
+				if (BlockType != 0)
 				{
-					AxisCols[AXIS_Z][X + Y * GridSize.X] |= (1ULL << Z);
-					AxisCols[AXIS_X][Y + Z * GridSize.Y] |= (1ULL << X);
-					AxisCols[AXIS_Y][Z + X * GridSize.Z] |= (1ULL << Y);
+					TArray<uint64>* Cols = (BlockType == BLOCKTYPE_WATER) ? WaterAxisCols : SolidAxisCols;
+					Cols[AXIS_Z][X + Y * GridSize.X] |= (1ULL << Z);
+					Cols[AXIS_X][Y + Z * GridSize.Y] |= (1ULL << X);
+					Cols[AXIS_Y][Z + X * GridSize.Z] |= (1ULL << Y);
 				}
 			}
 		}
@@ -105,45 +112,48 @@ void UVoxelObject::GenerateMeshData(const FVoxelGrid3D& Grid, float VoxelSize, T
 
 	// 2. Face Culling
 	TArray<uint64> ColFaceMasks[3][2];
-	ColFaceMasks[AXIS_Z][0].SetNumZeroed(AxisSizes[AXIS_Z]);
-	ColFaceMasks[AXIS_Z][1].SetNumZeroed(AxisSizes[AXIS_Z]);
-	ColFaceMasks[AXIS_X][0].SetNumZeroed(AxisSizes[AXIS_X]);
-	ColFaceMasks[AXIS_X][1].SetNumZeroed(AxisSizes[AXIS_X]);
-	ColFaceMasks[AXIS_Y][0].SetNumZeroed(AxisSizes[AXIS_Y]);
-	ColFaceMasks[AXIS_Y][1].SetNumZeroed(AxisSizes[AXIS_Y]);
-
 	for (int32 Axis = 0; Axis < 3; ++Axis)
 	{
+		ColFaceMasks[Axis][0].SetNumZeroed(AxisSizes[Axis]);
+		ColFaceMasks[Axis][1].SetNumZeroed(AxisSizes[Axis]);
+		
 		const int32 AxisDim = (Axis == 0 ? GridSize.Z : (Axis == 1 ? GridSize.X : GridSize.Y));
 		
 		for (int32 i = 0; i < AxisSizes[Axis]; ++i)
 		{
-			uint64 Col = AxisCols[Axis][i];
-			uint64 NeighborNegBit = 0;
-			uint64 NeighborPosBit = 0;
+			const uint64 SolidCol = SolidAxisCols[Axis][i];
+			const uint64 WaterCol = WaterAxisCols[Axis][i];
+			uint64 SNegBit = 0, SPosBit = 0, WNegBit = 0, WPosBit = 0;
 
 			if (NeighborMasks)
 			{
-				const TArray<uint64>& MaskNeg = NeighborMasks->NeighborBits[Axis][0];
-				const TArray<uint64>& MaskPos = NeighborMasks->NeighborBits[Axis][1];
-
-				if (MaskNeg.Num() > (i / 64))
+				const int32 MaskIdx = i / 64;
+				const uint64 MaskBit = 1ULL << (i % 64);
+				if (NeighborMasks->NeighborBits[0][Axis][0].IsValidIndex(MaskIdx))
 				{
-					NeighborNegBit = (MaskNeg[i / 64] & (1ULL << (i % 64))) ? 1ULL : 0ULL;
-				}
-				if (MaskPos.Num() > (i / 64))
-				{
-					NeighborPosBit = (MaskPos[i / 64] & (1ULL << (i % 64))) ? 1ULL : 0ULL;
+					SNegBit = (NeighborMasks->NeighborBits[0][Axis][0][MaskIdx] & MaskBit) ? 1ULL : 0ULL;
+					SPosBit = (NeighborMasks->NeighborBits[0][Axis][1][MaskIdx] & MaskBit) ? 1ULL : 0ULL;
+					WNegBit = (NeighborMasks->NeighborBits[1][Axis][0][MaskIdx] & MaskBit) ? 1ULL : 0ULL;
+					WPosBit = (NeighborMasks->NeighborBits[1][Axis][1][MaskIdx] & MaskBit) ? 1ULL : 0ULL;
 				}
 			}
 
-			ColFaceMasks[Axis][0][i] = Col & ~(Col << 1 | NeighborNegBit);
-			ColFaceMasks[Axis][1][i] = Col & ~(Col >> 1 | (NeighborPosBit << (AxisDim - 1)));
+			// Solid culling: Solid faces are only culled by other solid blocks
+			const uint64 SNegMask = SolidCol << 1 | SNegBit;
+			const uint64 SPosMask = SolidCol >> 1 | (SPosBit << (AxisDim - 1));
+			
+			// Water culling: Water faces are culled by ANY block (solid or water)
+			const uint64 AnyCol = SolidCol | WaterCol;
+			const uint64 AnyNegMask = AnyCol << 1 | (SNegBit | WNegBit);
+			const uint64 AnyPosMask = AnyCol >> 1 | ((SPosBit | WPosBit) << (AxisDim - 1));
+
+			ColFaceMasks[Axis][0][i] = (SolidCol & ~SNegMask) | (WaterCol & ~AnyNegMask);
+			ColFaceMasks[Axis][1][i] = (SolidCol & ~SPosMask) | (WaterCol & ~AnyPosMask);
 		}
 	}
 
 	// 3. Greedy Meshing Planes
-	TMap<uint8, TMap<int32, TArray<uint64>>> PlaneGroups[6]; // Now maps BlockType -> (AxisPos -> PlaneData)
+	TMap<int32, TArray<uint64>> PlaneGroups[6][2]; // [face][0=solid, 1=water] -> (AxisPos -> PlaneData)
 
 	for (int32 FaceIdx = 0; FaceIdx < 6; ++FaceIdx)
 	{
@@ -171,8 +181,8 @@ void UVoxelObject::GenerateMeshData(const FVoxelGrid3D& Grid, float VoxelSize, T
 
 					uint8 BlockType = Grid.GetVoxel(VoxelPos.X, VoxelPos.Y, VoxelPos.Z);
 					
-					TMap<int32, TArray<uint64>>& Layers = PlaneGroups[FaceIdx].FindOrAdd(BlockType);
-					TArray<uint64>& Plane = Layers.FindOrAdd(V3);
+					const int32 TypeIdx = (BlockType == BLOCKTYPE_WATER) ? 1 : 0;
+					TArray<uint64>& Plane = PlaneGroups[FaceIdx][TypeIdx].FindOrAdd(V3);
 					if (Plane.Num() == 0) Plane.SetNumZeroed(Dim1Size);
 					Plane[V1] |= (1ULL << V2);
 				}
@@ -184,6 +194,7 @@ void UVoxelObject::GenerateMeshData(const FVoxelGrid3D& Grid, float VoxelSize, T
 	auto AddQuad = [&](const FGreedyQuad& Quad, int32 AxisPos, int32 FaceIdx, uint8 BlockType)
 	{
 		int32 Axis = FaceIdx / 2;
+		FVoxelMeshData& TargetMesh = (BlockType == BLOCKTYPE_WATER) ? OutWaterMeshData : OutSolidMeshData;
 		
 		auto GetPos = [&](int32 V1, int32 V2, int32 V3) -> FVector {
 			if (Axis == 0)      return FVector(V1, V2, V3) * VoxelSize;
@@ -207,47 +218,52 @@ void UVoxelObject::GenerateMeshData(const FVoxelGrid3D& Grid, float VoxelSize, T
 		};
 		FVector Normal = Normals[FaceIdx];
 
-		int32 BaseIdx = OutMeshData.Vertices.Num();
+		FVector2D QuadUVs[4];
+		QuadUVs[0] = FVector2D(Quad.X,          Quad.Y);
+		QuadUVs[1] = FVector2D(Quad.X + Quad.W, Quad.Y);
+		QuadUVs[2] = FVector2D(Quad.X + Quad.W, Quad.Y + Quad.H);
+		QuadUVs[3] = FVector2D(Quad.X,          Quad.Y + Quad.H);
+
+		int32 BaseIdx = TargetMesh.Vertices.Num();
 		for (int32 i = 0; i < 4; ++i)
 		{
-			OutMeshData.Vertices.Add(Verts[i]);
-			OutMeshData.Normals.Add(Normal);
-			OutMeshData.Colors.Add(FLinearColor(ColorFunc(BlockType, Verts[i], Normal)));
+			TargetMesh.Vertices.Add(Verts[i]);
+			TargetMesh.Normals.Add(Normal);
+			TargetMesh.UV0.Add(QuadUVs[i]);
+			TargetMesh.Colors.Add(FLinearColor(ColorFunc(BlockType, Verts[i], Normal)));
 		}
 
 		if (FaceIdx % 2 == 0) // Negative faces
 		{
-			OutMeshData.Triangles.Add(BaseIdx + 0);
-			OutMeshData.Triangles.Add(BaseIdx + 1);
-			OutMeshData.Triangles.Add(BaseIdx + 2);
-			OutMeshData.Triangles.Add(BaseIdx + 0);
-			OutMeshData.Triangles.Add(BaseIdx + 2);
-			OutMeshData.Triangles.Add(BaseIdx + 3);
+			TargetMesh.Triangles.Add(BaseIdx + 0);
+			TargetMesh.Triangles.Add(BaseIdx + 1);
+			TargetMesh.Triangles.Add(BaseIdx + 2);
+			TargetMesh.Triangles.Add(BaseIdx + 0);
+			TargetMesh.Triangles.Add(BaseIdx + 2);
+			TargetMesh.Triangles.Add(BaseIdx + 3);
 		}
 		else // Positive faces
 		{
-			OutMeshData.Triangles.Add(BaseIdx + 0);
-			OutMeshData.Triangles.Add(BaseIdx + 2);
-			OutMeshData.Triangles.Add(BaseIdx + 1);
-			OutMeshData.Triangles.Add(BaseIdx + 0);
-			OutMeshData.Triangles.Add(BaseIdx + 3);
-			OutMeshData.Triangles.Add(BaseIdx + 2);
+			TargetMesh.Triangles.Add(BaseIdx + 0);
+			TargetMesh.Triangles.Add(BaseIdx + 2);
+			TargetMesh.Triangles.Add(BaseIdx + 1);
+			TargetMesh.Triangles.Add(BaseIdx + 0);
+			TargetMesh.Triangles.Add(BaseIdx + 3);
+			TargetMesh.Triangles.Add(BaseIdx + 2);
 		}
 	};
 
+	static const uint8 TypeToBlock[2] = { 1, BLOCKTYPE_WATER };
 	for (int32 FaceIdx = 0; FaceIdx < 6; ++FaceIdx)
 	{
-		for (auto& TypeGroup : PlaneGroups[FaceIdx])
-		{
-			uint8 BlockType = TypeGroup.Key;
-			for (auto& PosGroup : TypeGroup.Value)
-			{
-				int32 PosOnAxis = PosGroup.Key;
-				TArray<uint64>& Plane = PosGroup.Value;
-				
-				const uint32 Axis = FaceIdx / 2;
-				int32 PlaneHeight = (Axis == AXIS_Z ? GridSize.Y : (Axis == AXIS_X ? GridSize.Z : GridSize.X));
+		const uint32 Axis       = FaceIdx / 2;
+		const int32 PlaneHeight = (Axis == AXIS_Z ? GridSize.Y : (Axis == AXIS_X ? GridSize.Z : GridSize.X));
 
+		for (int32 TypeIdx = 0; TypeIdx < 2; ++TypeIdx)
+		{
+			const uint8 BlockType = TypeToBlock[TypeIdx];
+			for (auto& [PosOnAxis, Plane] : PlaneGroups[FaceIdx][TypeIdx])
+			{
 				TArray<FGreedyQuad> Quads = GreedyMeshBinaryPlane(Plane, PlaneHeight);
 				for (const FGreedyQuad& Quad : Quads)
 				{
@@ -315,7 +331,7 @@ void UVoxelObject::GenerateHeightmapMeshData(const TArray<int32>& HeightMap, con
 	OutMeshData.Normals.Init(FVector(0, 0, 1), OutMeshData.Vertices.Num());
 }
 
-UProceduralMeshComponent* UVoxelObject::Spawn(AActor* Owner, UMaterialInterface* Material, bool bCreateCollision)
+UProceduralMeshComponent* UVoxelObject::Spawn(AActor* Owner, UMaterialInterface* Material, UMaterialInterface* WaterMaterial, bool bCreateCollision)
 {
 	if (!Owner) return nullptr;
 
@@ -325,41 +341,30 @@ UProceduralMeshComponent* UVoxelObject::Spawn(AActor* Owner, UMaterialInterface*
 		MeshComponent->RegisterComponent();
 		
 		USceneComponent* Root = Owner->GetRootComponent();
-		if (Root)
-		{
-			MeshComponent->AttachToComponent(Root, FAttachmentTransformRules::KeepRelativeTransform);
-		}
-		else
-		{
-			Owner->SetRootComponent(MeshComponent);
-		}
+		if (Root) MeshComponent->AttachToComponent(Root, FAttachmentTransformRules::KeepRelativeTransform);
+		else      Owner->SetRootComponent(MeshComponent);
 		
 		MeshComponent->bUseComplexAsSimpleCollision = true;
 		MeshComponent->bUseAsyncCooking = true; // Offload Physic/Chaos baking to background threads
 	}
 
-	TArray<FVector2D> EmptyUVs;
-	TArray<FProcMeshTangent> EmptyTangents;
-
-	MeshComponent->CreateMeshSection_LinearColor(
-		0,
-		MeshData.Vertices,
-		MeshData.Triangles,
-		MeshData.Normals,
-		EmptyUVs,
-		MeshData.Colors,
-		EmptyTangents,
-		bCreateCollision);
-
-	// ── MEMORY OPTIMIZATION ──
-	// ProceduralMeshComponent already copied the data. 
-	// Clear our local copy to reclaim memory.
-	MeshData.Clear();
-
-	if (Material)
-	{
-		MeshComponent->SetMaterial(0, Material);
-	}
+	UpdateMeshSection(0, MeshData, Material, bCreateCollision);
+	UpdateMeshSection(1, WaterMeshData, WaterMaterial, false);
 
 	return MeshComponent;
+}
+
+void UVoxelObject::UpdateMeshSection(int32 SectionIdx, FVoxelMeshData& Data, UMaterialInterface* Material, bool bCreateCollision)
+{
+	if (Data.Vertices.Num() > 0)
+	{
+		static const TArray<FProcMeshTangent> EmptyTangents;
+		MeshComponent->CreateMeshSection_LinearColor(SectionIdx, Data.Vertices, Data.Triangles, Data.Normals, Data.UV0, Data.Colors, EmptyTangents, bCreateCollision);
+		if (Material) MeshComponent->SetMaterial(SectionIdx, Material);
+	}
+	else
+	{
+		MeshComponent->ClearMeshSection(SectionIdx);
+	}
+	Data.Clear();
 }

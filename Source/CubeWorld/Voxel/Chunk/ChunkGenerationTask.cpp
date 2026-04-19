@@ -214,6 +214,10 @@ void FChunkGenerationTask::GenerateVoxelLayers(
 				}
 			}
 		}
+		if (WaterLevel > ZBase)
+		{
+			bHasAnyBlocks = true;
+		}
 	FoundBlocks:
 
 		FChunkGenerationResult Result;
@@ -236,17 +240,16 @@ void FChunkGenerationTask::GenerateVoxelLayers(
 				EffectiveChunkHeight * EffectiveChunkSize			// Y-axis (Z * X)
 			};
 
+			for (int32 Type = 0; Type < 2; ++Type)
 			for (int32 Axis = 0; Axis < 3; ++Axis)
+			for (int32 Dir  = 0; Dir  < 2; ++Dir)
 			{
-				for (int32 Dir = 0; Dir < 2; ++Dir)
-				{
-					NeighborMasks.NeighborBits[Axis][Dir].SetNumZeroed((AxisSizes[Axis] + 63) / 64);
-				}
+				NeighborMasks.NeighborBits[Type][Axis][Dir].SetNumZeroed((AxisSizes[Axis] + 63) / 64);
 			}
 
-			auto SetNeighborBit = [&](int32 Axis, int32 Dir, int32 BitIdx)
+			auto SetNeighborBit = [&](int32 Axis, int32 Dir, int32 BitIdx, bool bWater = false)
 			{
-				NeighborMasks.NeighborBits[Axis][Dir][BitIdx / 64] |= (1ULL << (BitIdx % 64));
+				NeighborMasks.NeighborBits[bWater ? 1 : 0][Axis][Dir][BitIdx / 64] |= (1ULL << (BitIdx % 64));
 			};
 
 			// 1. Populate internal grid and Z-neighbor masks
@@ -259,63 +262,69 @@ void FChunkGenerationTask::GenerateVoxelLayers(
 					const int32 ColHeight = HeightMap[MapIdx];
 
 					const int32 LimitZ = FMath::Clamp((ColHeight - ZBase + LODScale - 1) / LODScale, 0, EffectiveChunkHeight);
+					const int32 WaterLimitZ = FMath::Clamp((WaterLevel - ZBase + LODScale - 1) / LODScale, 0, EffectiveChunkHeight);
 
 					for (int32 LocalZ = 0; LocalZ < LimitZ; ++LocalZ)
 					{
 						Grid.SetVoxel(X, Y, LocalZ, BlockType);
 					}
+					for (int32 LocalZ = LimitZ; LocalZ < WaterLimitZ; ++LocalZ)
+					{
+						Grid.SetVoxel(X, Y, LocalZ, BLOCKTYPE_WATER);
+					}
 
-					// Z-neighbor bits
+					// Z-neighbor bits: check if block exists at ZBase-1 (bottom) or ZBase + ChunkHeight (top)
 					const int32 BitIdx = X + Y * EffectiveChunkSize;
-					if (ColHeight >= ZBase) // Solid voxel below at ZBase-1
-					{
-						SetNeighborBit(0, 0, BitIdx);
-					}
-					if (ColHeight >= ZBase + (EffectiveChunkHeight + 1) * LODScale) // Solid voxel above at ZBase + ChunkHeight
-					{
-						SetNeighborBit(0, 1, BitIdx);
-					}
+					if (ColHeight >= ZBase) SetNeighborBit(0, 0, BitIdx);
+					if (WaterLevel >= ZBase) SetNeighborBit(0, 0, BitIdx, true);
+					if (ColHeight >= ZBase + (EffectiveChunkHeight + 1) * LODScale) SetNeighborBit(0, 1, BitIdx);
+					if (WaterLevel >= ZBase + (EffectiveChunkHeight + 1) * LODScale) SetNeighborBit(0, 1, BitIdx, true);
 				}
 			}
 
-			// 2. Populate X-neighbor masks (X=-1 and X=Size)
-			for (int32 Y = 0; Y < EffectiveChunkSize; ++Y)
+			// 2. Populate X/Y boundary neighbor masks (X=-1, X=Size, Y=-1, Y=Size)
+			for (int32 i = 0; i < EffectiveChunkSize; ++i)
 			{
-				const int32 H_NegX = HeightMap[0 * MapWidth + (Y + 1)];
-				const int32 H_PosX = HeightMap[(EffectiveChunkSize + 1) * MapWidth + (Y + 1)];
+				const int32 H_NegX = HeightMap[0 * MapWidth + (i + 1)];
+				const int32 H_PosX = HeightMap[(EffectiveChunkSize + 1) * MapWidth + (i + 1)];
+				const int32 H_NegY = HeightMap[(i + 1) * MapWidth + 0];
+				const int32 H_PosY = HeightMap[(i + 1) * MapWidth + (EffectiveChunkSize + 1)];
 
 				for (int32 LocalZ = 0; LocalZ < EffectiveChunkHeight; ++LocalZ)
 				{
 					const int32 Threshold = ZBase + (LocalZ * LODScale) + 1;
-					const int32 BitIdx = Y + LocalZ * EffectiveChunkSize;
-					if (H_NegX >= Threshold) SetNeighborBit(1, 0, BitIdx);
-					if (H_PosX >= Threshold) SetNeighborBit(1, 1, BitIdx);
-				}
-			}
+					
+					// X neighbors (Index: Y + Z * Size)
+					const int32 XBitIdx = i + LocalZ * EffectiveChunkSize;
+					if (H_NegX >= Threshold) SetNeighborBit(1, 0, XBitIdx);
+					if (H_PosX >= Threshold) SetNeighborBit(1, 1, XBitIdx);
 
-			// 3. Populate Y-neighbor masks (Y=-1 and Y=Size)
-			for (int32 X = 0; X < EffectiveChunkSize; ++X)
-			{
-				const int32 H_NegY = HeightMap[(X + 1) * MapWidth + 0];
-				const int32 H_PosY = HeightMap[(X + 1) * MapWidth + (EffectiveChunkSize + 1)];
+					// Y neighbors (Index: Z + X * Height)
+					const int32 YBitIdx = LocalZ + i * EffectiveChunkHeight;
+					if (H_NegY >= Threshold) SetNeighborBit(2, 0, YBitIdx);
+					if (H_PosY >= Threshold) SetNeighborBit(2, 1, YBitIdx);
 
-				for (int32 LocalZ = 0; LocalZ < EffectiveChunkHeight; ++LocalZ)
-				{
-					const int32 Threshold = ZBase + (LocalZ * LODScale) + 1;
-					const int32 BitIdx = LocalZ + X * EffectiveChunkHeight; // Indices must match AxisCols in mesher
-					if (H_NegY >= Threshold) SetNeighborBit(2, 0, BitIdx);
-					if (H_PosY >= Threshold) SetNeighborBit(2, 1, BitIdx);
+					if (WaterLevel >= Threshold)
+					{
+						SetNeighborBit(1, 0, XBitIdx, true); SetNeighborBit(1, 1, XBitIdx, true);
+						SetNeighborBit(2, 0, YBitIdx, true); SetNeighborBit(2, 1, YBitIdx, true);
+					}
 				}
 			}
 
 			UVoxelObject::GenerateMeshData(Grid, EffectiveVoxelSize,
-				[&ColorMap, MapWidth, EffectiveVoxelSize](uint8 /*BlockType*/, const FVector& Pos, const FVector& /*Normal*/) -> FColor
+				[&ColorMap, MapWidth, EffectiveVoxelSize](uint8 BlockType, const FVector& Pos, const FVector& Normal) -> FColor
 				{
+				    if (BlockType == BLOCKTYPE_WATER)
+					{
+						return WATER_COLOR;
+					}
 					const int32 GX = FMath::Clamp(FMath::FloorToInt32(Pos.X / EffectiveVoxelSize), 0, MapWidth - 3);
 					const int32 GY = FMath::Clamp(FMath::FloorToInt32(Pos.Y / EffectiveVoxelSize), 0, MapWidth - 3);
 					return ColorMap[(GX + 1) * MapWidth + (GY + 1)];
 				},
 				Result.MeshData,
+				Result.WaterMeshData,
 				&NeighborMasks);
 		}
 

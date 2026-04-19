@@ -91,6 +91,14 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Material")
 	UMaterialInterface* TerrainMaterial;
 
+	/** The material to apply to water. If null, a translucent blue material is created. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Material")
+	UMaterialInterface* WaterMaterial;
+
+	/** The height below which empty blocks are filled with water. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Water")
+	int32 WaterLevel = 10;
+
 private:
 	/** Currently loaded chunks, keyed by 3D chunk coordinate (X, Y, Z layer). */
 	TMap<FIntVector, AWorldChunk*> LoadedChunks;
@@ -126,6 +134,10 @@ private:
 	/** Cached material created at runtime if TerrainMaterial is null. */
 	UPROPERTY()
 	UMaterialInterface* CachedRuntimeMaterial;
+
+	/** Cached material created at runtime if WaterMaterial is null. */
+	UPROPERTY()
+	UMaterialInterface* CachedRuntimeWaterMaterial;
 
 	// ── LOD 3 Sector Batching ────────────────────────────────────────────
 	// Instead of one actor per LOD-3 column (~14K draw calls), we group

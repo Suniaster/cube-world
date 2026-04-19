@@ -3,18 +3,23 @@
 #include "CoreMinimal.h"
 #include "VoxelTypes.generated.h"
 
+constexpr uint8 BLOCKTYPE_WATER = 255;
+constexpr FColor WATER_COLOR(50, 100, 200, 255);
+
 /** Bitmasks for neighboring voxels at chunk boundaries. */
 USTRUCT(BlueprintType)
 struct FVoxelNeighborMasks
 {
 	GENERATED_BODY()
 
-	/** 
-	 * For each axis (0=Z, 1=X, 2=Y) and direction (0=negative, 1=positive),
-	 * an array of uint64s containing one bit per column.
-	 * Total bits per mask = AxisSizes[Axis].
+	/**
+	 * Indexed by [Type][Axis][Dir] where:
+	 *   Type: 0 = solid, 1 = water
+	 *   Axis: 0 = Z,     1 = X,     2 = Y
+	 *   Dir:  0 = negative, 1 = positive
+	 * Total bits per entry = AxisSizes[Axis].
 	 */
-	TArray<uint64> NeighborBits[3][2];
+	TArray<uint64> NeighborBits[2][3][2];
 };
 
 /** Data for a 3D voxel grid. */

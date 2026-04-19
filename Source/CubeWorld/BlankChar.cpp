@@ -113,6 +113,29 @@ void ABlankChar::Tick(float DeltaTime) {
   Super::Tick(DeltaTime);
 
   UpdateProceduralAnimation(DeltaTime);
+
+  // Check if camera is underwater
+  const bool bWasUnderwater = bIsUnderwater;
+  bIsUnderwater = (FollowCamera->GetComponentLocation().Z < WaterLevel * VoxelSize);
+
+  if (bIsUnderwater != bWasUnderwater)
+  {
+    UpdateUnderwaterPostProcess(bIsUnderwater);
+  }
+}
+
+void ABlankChar::UpdateUnderwaterPostProcess(bool bUnderwater)
+{
+  FollowCamera->PostProcessSettings.bOverride_ColorSaturation = bUnderwater;
+  FollowCamera->PostProcessSettings.bOverride_SceneColorTint = bUnderwater;
+  FollowCamera->PostProcessSettings.bOverride_DepthOfFieldFocalDistance = bUnderwater;
+
+  if (bUnderwater)
+  {
+    FollowCamera->PostProcessSettings.ColorSaturation = FVector4(0.3f, 0.4f, 1.2f, 1.0f);
+    FollowCamera->PostProcessSettings.SceneColorTint = FLinearColor(0.2f, 0.4f, 0.8f, 1.0f);
+    FollowCamera->PostProcessSettings.DepthOfFieldFocalDistance = 100.0f;
+  }
 }
 
 void ABlankChar::UpdateProceduralAnimation(float DeltaTime) {

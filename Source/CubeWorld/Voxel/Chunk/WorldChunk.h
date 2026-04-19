@@ -26,7 +26,9 @@ public:
 	void ApplyGeneratedMesh(
 		const FIntVector& InKey,
 		const FVoxelMeshData& InMeshData,
+		const FVoxelMeshData& InWaterMeshData,
 		UMaterialInterface* InMaterial,
+		UMaterialInterface* InWaterMaterial,
 		int32 InLODLevel = 0);
 
 	/** Returns the chunk coordinate this chunk was generated for. */

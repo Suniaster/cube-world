@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "UObject/NoExportTypes.h"
 #include "VoxelTypes.h"
+
 #include "VoxelObject.generated.h"
 
 class UProceduralMeshComponent;
@@ -22,6 +23,8 @@ struct FVoxelMeshData
 	UPROPERTY(BlueprintReadWrite)
 	TArray<FVector> Normals;
 
+	TArray<FVector2D> UV0;
+
 	UPROPERTY(BlueprintReadWrite)
 	TArray<FLinearColor> Colors;
 
@@ -30,6 +33,7 @@ struct FVoxelMeshData
 		Vertices.Empty();
 		Triangles.Empty();
 		Normals.Empty();
+		UV0.Empty();
 		Colors.Empty();
 	}
 };
@@ -51,7 +55,8 @@ public:
 		const FVoxelGrid3D& Grid,
 		float VoxelSize,
 		TFunctionRef<FColor(uint8 BlockType, const FVector& Pos, const FVector& Normal)> ColorFunc,
-		FVoxelMeshData& OutMeshData,
+		FVoxelMeshData& OutSolidMeshData,
+		FVoxelMeshData& OutWaterMeshData,
 		const FVoxelNeighborMasks* NeighborMasks = nullptr);
 
 	/** Thread-safe static function to generate mesh data from a heightmap (LOD 3+). */
@@ -66,13 +71,16 @@ public:
 
 	/** Spawns or updates a procedural mesh component on the target actor. */
 	UFUNCTION(BlueprintCallable, Category = "Voxel")
-	UProceduralMeshComponent* Spawn(AActor* Owner, UMaterialInterface* Material, bool bCreateCollision = true);
+	UProceduralMeshComponent* Spawn(AActor* Owner, UMaterialInterface* Material, UMaterialInterface* WaterMaterial, bool bCreateCollision = true);
 
 	/** Returns the stored mesh data (const). */
 	const FVoxelMeshData& GetMeshData() const { return MeshData; }
 
 	/** Returns the stored mesh data (non-const). */
 	FVoxelMeshData& GetMeshData() { return MeshData; }
+
+	const FVoxelMeshData& GetWaterMeshData() const { return WaterMeshData; }
+	FVoxelMeshData& GetWaterMeshData() { return WaterMeshData; }
 
 	/** Returns the spawned mesh component. */
 	UProceduralMeshComponent* GetMeshComponent() const { return MeshComponent; }
@@ -82,5 +90,11 @@ private:
 	FVoxelMeshData MeshData;
 
 	UPROPERTY()
+	FVoxelMeshData WaterMeshData;
+
+	UPROPERTY()
 	UProceduralMeshComponent* MeshComponent;
+
+	/** Internally updates a specific mesh section from mesh data. */
+	void UpdateMeshSection(int32 SectionIdx, FVoxelMeshData& Data, UMaterialInterface* Material, bool bCreateCollision);
 };

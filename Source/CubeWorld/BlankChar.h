@@ -86,7 +86,18 @@ protected:	// Target procedural poses
 	// Movement state
 	bool bIsRolling = false;
 	bool bIsRunning = false;
+	bool bIsUnderwater = false;
 	float RollTimer = 0.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
+	int32 WaterLevel = 10;
+
+	/** World-space size of one voxel in UU. Must match AChunkWorldManager::VoxelSize. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
+	float VoxelSize = 100.0f;
+
+	/** Updates camera post-process settings based on underwater state. */
+	void UpdateUnderwaterPostProcess(bool bUnderwater);
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Procedural Animation")
 	float RollDuration = 0.45f;

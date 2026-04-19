@@ -9,6 +9,7 @@
 
 #if WITH_EDITOR
 #include "Materials/MaterialExpressionVertexColor.h"
+#include "Materials/MaterialExpressionConstant.h"
 #endif
 
 AChunkWorldManager::AChunkWorldManager()
@@ -30,12 +31,16 @@ void AChunkWorldManager::BeginPlay()
 
 void AChunkWorldManager::EnsureMaterial()
 {
-	if (TerrainMaterial) return;
-	if (CachedRuntimeMaterial) return;
+	// Load user-created materials from expected paths if not already assigned
+	if (!TerrainMaterial && !CachedRuntimeMaterial)
+	{
+		CachedRuntimeMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Materials/M_VoxelTerrain.M_VoxelTerrain"));
+	}
 
-	// Try to load a user-created material first
-	CachedRuntimeMaterial = LoadObject<UMaterialInterface>(nullptr,
-		TEXT("/Game/Materials/M_VoxelTerrain.M_VoxelTerrain"));
+	if (!WaterMaterial && !CachedRuntimeWaterMaterial)
+	{
+		CachedRuntimeWaterMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Materials/M_VoxelWater.M_VoxelWater"));
+	}
 
 #if WITH_EDITOR
 	if (!CachedRuntimeMaterial)
@@ -227,6 +232,7 @@ void AChunkWorldManager::DispatchChunkTasks(FIntPoint Coord, int32 LODLevel)
 		Biomes,
 		BiomeBlendWidth,
 		&FinishedTasksQueue,
+		WaterLevel,
 		ColumnMaxHeightCache.FindRef(Coord),
 		HeightmapResolution
 	))->StartBackgroundTask();
@@ -291,6 +297,7 @@ void AChunkWorldManager::FlushDirtySectors()
 {
 	EnsureMaterial();
 	UMaterialInterface* UseMat = TerrainMaterial ? TerrainMaterial : CachedRuntimeMaterial;
+	UMaterialInterface* UseWaterMat = WaterMaterial ? WaterMaterial : CachedRuntimeWaterMaterial;
 
 	for (auto& [SectorCoord, Sector] : HeightmapSectors)
 	{
@@ -328,8 +335,9 @@ void AChunkWorldManager::FlushDirtySectors()
 		if (Sector.Actor)
 		{
 			// Use sector coord as the key; LOD 3 disables collision + lighting.
+			// Water is never present in heightmap (LOD 3) sectors, so pass an empty water mesh with no material.
 			const FIntVector SectorKey(SectorCoord.X, SectorCoord.Y, 0);
-			Sector.Actor->ApplyGeneratedMesh(SectorKey, Merged, UseMat, 3);
+			Sector.Actor->ApplyGeneratedMesh(SectorKey, Merged, FVoxelMeshData{}, UseMat, nullptr, 3);
 		}
 	}
 }
@@ -446,6 +454,7 @@ bool AChunkWorldManager::HandleVoxelResult(const FChunkGenerationResult& Result)
 {
 	EnsureMaterial();
 	UMaterialInterface* UseMat = TerrainMaterial ? TerrainMaterial : CachedRuntimeMaterial;
+	UMaterialInterface* UseWaterMat = WaterMaterial ? WaterMaterial : CachedRuntimeWaterMaterial;
 
 	FIntVector Key(Result.ChunkCoord.X, Result.ChunkCoord.Y, Result.ZLayer);
 
@@ -455,7 +464,7 @@ bool AChunkWorldManager::HandleVoxelResult(const FChunkGenerationResult& Result)
 		AWorldChunk** ExistingChunkPtr = LoadedChunks.Find(Key);
 		if (ExistingChunkPtr && *ExistingChunkPtr)
 		{
-			(*ExistingChunkPtr)->ApplyGeneratedMesh(Key, Result.MeshData, UseMat, Result.LODLevel);
+			(*ExistingChunkPtr)->ApplyGeneratedMesh(Key, Result.MeshData, Result.WaterMeshData, UseMat, UseWaterMat, Result.LODLevel);
 			RemoveColumnFromSector(Result.ChunkCoord);
 			return true;
 		}
@@ -478,7 +487,7 @@ bool AChunkWorldManager::HandleVoxelResult(const FChunkGenerationResult& Result)
 
 			if (NewChunk)
 			{
-				NewChunk->ApplyGeneratedMesh(Key, Result.MeshData, UseMat, Result.LODLevel);
+				NewChunk->ApplyGeneratedMesh(Key, Result.MeshData, Result.WaterMeshData, UseMat, UseWaterMat, Result.LODLevel);
 				LoadedChunks.Add(Key, NewChunk);
 				RemoveColumnFromSector(Result.ChunkCoord);
 				return true;
