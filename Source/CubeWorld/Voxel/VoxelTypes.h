@@ -4,6 +4,7 @@
 #include "VoxelTypes.generated.h"
 
 constexpr uint8 BLOCKTYPE_WATER = 255;
+
 constexpr FColor WATER_COLOR(50, 100, 200, 255);
 
 /** Bitmasks for neighboring voxels at chunk boundaries. */

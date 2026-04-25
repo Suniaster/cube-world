@@ -25,8 +25,8 @@ public:
 	/** Applies pre-generated mesh data to this chunk (must run on game thread). */
 	void ApplyGeneratedMesh(
 		const FIntVector& InKey,
-		const FVoxelMeshData& InMeshData,
-		const FVoxelMeshData& InWaterMeshData,
+		const FVoxelMeshData& InHeightmapData,
+		const TMap<uint8, FVoxelMeshData>& InBlockMeshes,
 		UMaterialInterface* InMaterial,
 		UMaterialInterface* InWaterMaterial,
 		int32 InLODLevel = 0);

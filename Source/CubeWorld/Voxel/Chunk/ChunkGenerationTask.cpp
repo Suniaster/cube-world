@@ -83,7 +83,7 @@ bool FChunkGenerationTask::GenerateLOD3Heightmap(float ChunkWorldX, float ChunkW
 
 	if (Result.bHasAnyBlocks)
 	{
-		UVoxelObject::GenerateHeightmapMeshData(CoarseHeightMap, CoarseColorMap, Res, Res, CellSize, VoxelSize, Result.MeshData);
+		UVoxelObject::GenerateHeightmapMeshData(CoarseHeightMap, CoarseColorMap, Res, Res, CellSize, VoxelSize, Result.HeightmapData);
 	}
 
 	if (ResultQueue)
@@ -312,19 +312,47 @@ void FChunkGenerationTask::GenerateVoxelLayers(
 				}
 			}
 
+			// 3. Compute feature placements (ZLayer 0 only — trees are independent instances)
+			if (ZLayerIdx == 0 && LODLevel <= MaxTreeLOD)
+			{
+				FChunkPlacementContext PlacementContext{
+					ChunkCoord,
+					ChunkSize,
+					VoxelSize,
+					EffectiveChunkSize,
+					EffectiveVoxelSize,
+					static_cast<float>(ChunkCoord.X) * ChunkSize * VoxelSize,
+					static_cast<float>(ChunkCoord.Y) * ChunkSize * VoxelSize,
+					BiomeCellSize,
+					Seed,
+					Biomes,
+					BlendWidth,
+					WaterLevel,
+					HeightMap,
+					BlockTypeMap,
+					MapWidth
+				};
+
+				for (const auto& Feature : Features)
+				{
+					if (Feature.IsValid())
+					{
+						Feature->ComputePlacements(PlacementContext, Result.FeaturePlacements);
+					}
+				}
+			}
+
 			UVoxelObject::GenerateMeshData(Grid, EffectiveVoxelSize,
 				[&ColorMap, MapWidth, EffectiveVoxelSize](uint8 BlockType, const FVector& Pos, const FVector& Normal) -> FColor
 				{
-				    if (BlockType == BLOCKTYPE_WATER)
-					{
-						return WATER_COLOR;
-					}
+					if (BlockType == BLOCKTYPE_WATER) return WATER_COLOR;
+
+					// Terrain block -> sample from 2D Biome ColorMap
 					const int32 GX = FMath::Clamp(FMath::FloorToInt32(Pos.X / EffectiveVoxelSize), 0, MapWidth - 3);
 					const int32 GY = FMath::Clamp(FMath::FloorToInt32(Pos.Y / EffectiveVoxelSize), 0, MapWidth - 3);
 					return ColorMap[(GX + 1) * MapWidth + (GY + 1)];
 				},
-				Result.MeshData,
-				Result.WaterMeshData,
+				Result.BlockMeshes,
 				&NeighborMasks);
 		}
 

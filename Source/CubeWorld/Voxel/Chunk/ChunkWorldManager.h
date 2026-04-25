@@ -3,10 +3,20 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "VoxelBiome.h"
+#include "../Trees/TreeGenerator.h"
 #include "ChunkGenerationTask.h"
+#include "../Features/VoxelFeatureGenerator.h"
+#include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "ChunkWorldManager.generated.h"
 
 class AWorldChunk;
+
+/** Tracks HISM components belonging to a specific column. */
+struct FColumnTreeInstances
+{
+	/** One HISM component per archetype, created locally for this column. */
+	TArray<UHierarchicalInstancedStaticMeshComponent*> Components;
+};
 
 /**
  * Manages dynamic loading/unloading of terrain chunks around the player.
@@ -99,6 +109,28 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Water")
 	int32 WaterLevel = 10;
 
+	/** Material applied to all trees. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Material")
+	UMaterialInterface* TreeMaterial;
+
+	// ── Trees ───────────────────────────────────────────────────────────
+	
+	/** Properties for tree procedural generation */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Trees")
+	FVoxelTreeParams TreeParams;
+
+	/** Number of unique base trees to generate to ensure variety */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Trees")
+	int32 BaseTreeCount = 10;
+
+	/** World-space size of a tree cell used for placement. Should be larger than biggest tree diameter. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Trees")
+	float TreeCellSize = 3500.0f;
+
+	/** Maximum LOD level at which trees will still be generated and spawned. 0 = LOD 0 only. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Trees", meta = (ClampMin = "0", ClampMax = "2"))
+	int32 MaxTreeLOD = 2;
+
 private:
 	/** Currently loaded chunks, keyed by 3D chunk coordinate (X, Y, Z layer). */
 	TMap<FIntVector, AWorldChunk*> LoadedChunks;
@@ -138,6 +170,25 @@ private:
 	/** Cached material created at runtime if WaterMaterial is null. */
 	UPROPERTY()
 	UMaterialInterface* CachedRuntimeWaterMaterial;
+
+	/** Array of generated base tree archetypes. Each archetype has its mesh pre-baked. */
+	TArray<FVoxelTreeData> CachedBaseTrees;
+
+	/** Thread-safe array of active feature generators passed to chunks */
+	TArray<TSharedPtr<const IVoxelFeatureGenerator, ESPMode::ThreadSafe>> ActiveFeatures;
+
+	/** Tree instances currently alive, keyed by chunk XY column coord. */
+	TMap<FIntPoint, FColumnTreeInstances> ColumnTreeInstances;
+
+	/** Baked static meshes for each tree archetype. */
+	UPROPERTY()
+	TArray<class UStaticMesh*> BakedTreeMeshes;
+
+	/** Pre-generates tree archetypes and bakes their meshes once. */
+	void GenerateTreeArchetypes();
+
+	/** Adds instances to HISM for a column based on FeaturePlacements. */
+	void UpdateTreeInstancesForColumn(FIntPoint Coord, const TArray<FFeaturePlacement>& Placements, int32 LODLevel);
 
 	// ── LOD 3 Sector Batching ────────────────────────────────────────────
 	// Instead of one actor per LOD-3 column (~14K draw calls), we group
@@ -200,4 +251,10 @@ private:
 
 	/** Handle a finished voxel result (LOD 0-2). Returns true if mesh was uploaded. */
 	bool HandleVoxelResult(const FChunkGenerationResult& Result);
+
+	/** Clean up sector data and spawn tree actors after a voxel chunk mesh is applied. */
+	void PostApplyChunk(const FChunkGenerationResult& Result, UMaterialInterface* Material);
+
+	/** Returns true if column A should be processed before B (lower LOD = higher priority, then closer distance). */
+	bool CompareColumnPriority(const FIntPoint& A, const FIntPoint& B) const;
 };

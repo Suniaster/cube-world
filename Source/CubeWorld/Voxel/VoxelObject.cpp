@@ -1,6 +1,10 @@
 #include "VoxelObject.h"
 #include "ProceduralMeshComponent.h"
 #include "GameFramework/Actor.h"
+#include "Engine/StaticMesh.h"
+#include "MeshDescription.h"
+#include "StaticMeshAttributes.h"
+#include "StaticMeshDescription.h"
 
 struct FGreedyQuad
 {
@@ -67,10 +71,9 @@ UVoxelObject::UVoxelObject()
 {
 }
 
-void UVoxelObject::GenerateMeshData(const FVoxelGrid3D& Grid, float VoxelSize, TFunctionRef<FColor(uint8 BlockType, const FVector& Pos, const FVector& Normal)> ColorFunc, FVoxelMeshData& OutSolidMeshData, FVoxelMeshData& OutWaterMeshData, const FVoxelNeighborMasks* NeighborMasks)
+void UVoxelObject::GenerateMeshData(const FVoxelGrid3D& Grid, float VoxelSize, TFunctionRef<FColor(uint8 BlockType, const FVector& Pos, const FVector& Normal)> ColorFunc, TMap<uint8, FVoxelMeshData>& OutBlockMeshes, const FVoxelNeighborMasks* NeighborMasks)
 {
-	OutSolidMeshData.Clear();
-	OutWaterMeshData.Clear();
+	OutBlockMeshes.Empty();
 
 	const FIntVector GridSize = Grid.Size;
 	if (GridSize.X <= 0 || GridSize.Y <= 0 || GridSize.Z <= 0) return;
@@ -153,7 +156,7 @@ void UVoxelObject::GenerateMeshData(const FVoxelGrid3D& Grid, float VoxelSize, T
 	}
 
 	// 3. Greedy Meshing Planes
-	TMap<int32, TArray<uint64>> PlaneGroups[6][2]; // [face][0=solid, 1=water] -> (AxisPos -> PlaneData)
+	TMap<uint8, TMap<int32, TArray<uint64>>> PlaneGroups[6]; // [face] -> BlockType -> (AxisPos -> PlaneData)
 
 	for (int32 FaceIdx = 0; FaceIdx < 6; ++FaceIdx)
 	{
@@ -181,8 +184,7 @@ void UVoxelObject::GenerateMeshData(const FVoxelGrid3D& Grid, float VoxelSize, T
 
 					uint8 BlockType = Grid.GetVoxel(VoxelPos.X, VoxelPos.Y, VoxelPos.Z);
 					
-					const int32 TypeIdx = (BlockType == BLOCKTYPE_WATER) ? 1 : 0;
-					TArray<uint64>& Plane = PlaneGroups[FaceIdx][TypeIdx].FindOrAdd(V3);
+					TArray<uint64>& Plane = PlaneGroups[FaceIdx].FindOrAdd(BlockType).FindOrAdd(V3);
 					if (Plane.Num() == 0) Plane.SetNumZeroed(Dim1Size);
 					Plane[V1] |= (1ULL << V2);
 				}
@@ -194,7 +196,7 @@ void UVoxelObject::GenerateMeshData(const FVoxelGrid3D& Grid, float VoxelSize, T
 	auto AddQuad = [&](const FGreedyQuad& Quad, int32 AxisPos, int32 FaceIdx, uint8 BlockType)
 	{
 		int32 Axis = FaceIdx / 2;
-		FVoxelMeshData& TargetMesh = (BlockType == BLOCKTYPE_WATER) ? OutWaterMeshData : OutSolidMeshData;
+		FVoxelMeshData& TargetMesh = OutBlockMeshes.FindOrAdd(BlockType);
 		
 		auto GetPos = [&](int32 V1, int32 V2, int32 V3) -> FVector {
 			if (Axis == 0)      return FVector(V1, V2, V3) * VoxelSize;
@@ -253,16 +255,14 @@ void UVoxelObject::GenerateMeshData(const FVoxelGrid3D& Grid, float VoxelSize, T
 		}
 	};
 
-	static const uint8 TypeToBlock[2] = { 1, BLOCKTYPE_WATER };
 	for (int32 FaceIdx = 0; FaceIdx < 6; ++FaceIdx)
 	{
 		const uint32 Axis       = FaceIdx / 2;
 		const int32 PlaneHeight = (Axis == AXIS_Z ? GridSize.Y : (Axis == AXIS_X ? GridSize.Z : GridSize.X));
 
-		for (int32 TypeIdx = 0; TypeIdx < 2; ++TypeIdx)
+		for (auto& [BlockType, PosMap] : PlaneGroups[FaceIdx])
 		{
-			const uint8 BlockType = TypeToBlock[TypeIdx];
-			for (auto& [PosOnAxis, Plane] : PlaneGroups[FaceIdx][TypeIdx])
+			for (auto& [PosOnAxis, Plane] : PosMap)
 			{
 				TArray<FGreedyQuad> Quads = GreedyMeshBinaryPlane(Plane, PlaneHeight);
 				for (const FGreedyQuad& Quad : Quads)
@@ -348,8 +348,29 @@ UProceduralMeshComponent* UVoxelObject::Spawn(AActor* Owner, UMaterialInterface*
 		MeshComponent->bUseAsyncCooking = true; // Offload Physic/Chaos baking to background threads
 	}
 
-	UpdateMeshSection(0, MeshData, Material, bCreateCollision);
-	UpdateMeshSection(1, WaterMeshData, WaterMaterial, false);
+	int32 SectionIdx = 0;
+	int32 NumExistingSections = MeshComponent->GetNumSections();
+
+	if (HeightmapData.Vertices.Num() > 0)
+	{
+		UpdateMeshSection(SectionIdx++, HeightmapData, Material, false);
+	}
+
+	for (auto& Pair : BlockMeshes)
+	{
+		uint8 BlockType = Pair.Key;
+		FVoxelMeshData& Data = Pair.Value;
+		
+		UMaterialInterface* UseMat = (BlockType == BLOCKTYPE_WATER) ? WaterMaterial : Material;
+		bool bCollision = bCreateCollision && (BlockType != BLOCKTYPE_WATER);
+		
+		UpdateMeshSection(SectionIdx++, Data, UseMat, bCollision);
+	}
+
+	for (int32 i = SectionIdx; i < NumExistingSections; ++i)
+	{
+		MeshComponent->ClearMeshSection(i);
+	}
 
 	return MeshComponent;
 }
@@ -367,4 +388,71 @@ void UVoxelObject::UpdateMeshSection(int32 SectionIdx, FVoxelMeshData& Data, UMa
 		MeshComponent->ClearMeshSection(SectionIdx);
 	}
 	Data.Clear();
+}
+
+UStaticMesh* UVoxelObject::BakeToStaticMesh(const TMap<uint8, FVoxelMeshData>& BlockMeshes, UObject* Outer, FName Name)
+{
+	if (BlockMeshes.IsEmpty()) return nullptr;
+
+	UStaticMesh* StaticMesh = NewObject<UStaticMesh>(Outer, Name, RF_Public | RF_Standalone);
+	StaticMesh->InitResources();
+	StaticMesh->SetLightingGuid();
+
+	FMeshDescription MeshDescription;
+	FStaticMeshAttributes Attributes(MeshDescription);
+	Attributes.Register();
+
+	TVertexAttributesRef<FVector3f> VertexPositions = Attributes.GetVertexPositions();
+	TVertexInstanceAttributesRef<FVector3f> VertexInstanceNormals = Attributes.GetVertexInstanceNormals();
+	TVertexInstanceAttributesRef<FVector2f> VertexInstanceUVs = Attributes.GetVertexInstanceUVs();
+	TVertexInstanceAttributesRef<FVector4f> VertexInstanceColors = Attributes.GetVertexInstanceColors();
+	TPolygonGroupAttributesRef<FName> PolygonGroupNames = Attributes.GetPolygonGroupMaterialSlotNames();
+
+	int32 SectionIdx = 0;
+	int32 TotalTriangles = 0;
+	for (const auto& Pair : BlockMeshes)
+	{
+		const FVoxelMeshData& Data = Pair.Value;
+		if (Data.Vertices.Num() == 0) continue;
+
+		FPolygonGroupID PolygonGroup = MeshDescription.CreatePolygonGroup();
+		PolygonGroupNames[PolygonGroup] = FName(*FString::Printf(TEXT("Section_%d"), SectionIdx++));
+
+		TArray<FVertexID> VertexIDs;
+		VertexIDs.Reserve(Data.Vertices.Num());
+
+		for (int32 i = 0; i < Data.Vertices.Num(); ++i)
+		{
+			FVertexID V = MeshDescription.CreateVertex();
+			VertexPositions[V] = (FVector3f)Data.Vertices[i];
+			VertexIDs.Add(V);
+		}
+
+		for (int32 i = 0; i < Data.Triangles.Num(); i += 3)
+		{
+			TArray<FVertexInstanceID> TriangleInstances;
+			for (int32 j = 0; j < 3; ++j)
+			{
+				int32 VIdx = Data.Triangles[i + j];
+				FVertexInstanceID VI = MeshDescription.CreateVertexInstance(VertexIDs[VIdx]);
+				VertexInstanceNormals[VI] = (FVector3f)Data.Normals[VIdx];
+				VertexInstanceUVs[VI] = (FVector2f)Data.UV0[VIdx];
+				VertexInstanceColors[VI] = FVector4f(FLinearColor(Data.Colors[VIdx]));
+				TriangleInstances.Add(VI);
+			}
+			MeshDescription.CreateTriangle(PolygonGroup, TriangleInstances);
+			TotalTriangles++;
+		}
+	}
+
+	UStaticMeshDescription* StaticMeshDesc = StaticMesh->CreateStaticMeshDescription();
+	StaticMeshDesc->SetMeshDescription(MeshDescription);
+
+	TArray<UStaticMeshDescription*> MeshDescriptions;
+	MeshDescriptions.Add(StaticMeshDesc);
+	StaticMesh->BuildFromStaticMeshDescriptions(MeshDescriptions);
+
+	UE_LOG(LogTemp, Warning, TEXT("Voxel: Baked StaticMesh '%s' with %d triangles."), *Name.ToString(), TotalTriangles);
+
+	return StaticMesh;
 }

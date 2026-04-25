@@ -6,6 +6,7 @@
 #include "../VoxelTypes.h"
 #include "VoxelBiome.h"
 #include "VoxelTerrainNoise.h"
+#include "../Features/VoxelFeatureGenerator.h"
 
 /** Result of a background chunk generation task. */
 struct FChunkGenerationResult
@@ -15,8 +16,9 @@ struct FChunkGenerationResult
 	int32 LODLevel;
 	/** Full-resolution max terrain height (voxel rows) for this XY column. Only valid on ZLayer == 0. */
 	int32 ColumnMaxHeight;
-	FVoxelMeshData MeshData;
-	FVoxelMeshData WaterMeshData;
+	FVoxelMeshData HeightmapData;
+	TMap<uint8, FVoxelMeshData> BlockMeshes;
+	TArray<FFeaturePlacement> FeaturePlacements;
 	bool bHasAnyBlocks;
 	bool bSuccess;
 	bool bIsHeightmap;
@@ -41,25 +43,18 @@ public:
 		int32 InLODLevel,
 		float InBiomeCellSize,
 		float InSeed,
-		TArray<FVoxelBiomeParams> InBiomes,
+		const TArray<FVoxelBiomeParams>& InBiomes,
 		float InBlendWidth,
-		TQueue<FChunkGenerationResult, EQueueMode::Mpsc>* InResultQueue,
-		int32 InWaterLevel = 10,
-		int32 InMaxHeightHint = 0,
-		int32 InHeightmapResolution = 4)
-		: ChunkCoord(InChunkCoord)
-		, ChunkSize(InChunkSize)
-		, ChunkHeight(InChunkHeight)
-		, VoxelSize(InVoxelSize)
-		, LODLevel(InLODLevel)
-		, BiomeCellSize(InBiomeCellSize)
-		, Seed(InSeed)
-		, Biomes(MoveTemp(InBiomes))
-		, BlendWidth(InBlendWidth)
-		, ResultQueue(InResultQueue)
-		, WaterLevel(InWaterLevel)
-		, MaxHeightHint(InMaxHeightHint)
-		, HeightmapResolution(InHeightmapResolution)
+		TQueue<FChunkGenerationResult, EQueueMode::Mpsc>* InQueue,
+		int32 InWaterLevel,
+		int32 InMaxHeightHint,
+		int32 InHeightmapResolution,
+		int32 InMaxTreeLOD,
+		const TArray<TSharedPtr<const IVoxelFeatureGenerator, ESPMode::ThreadSafe>>& InFeatures)
+		: ChunkCoord(InChunkCoord), ChunkSize(InChunkSize), ChunkHeight(InChunkHeight), VoxelSize(InVoxelSize),
+		  LODLevel(InLODLevel), BiomeCellSize(InBiomeCellSize), Seed(InSeed), Biomes(InBiomes), BlendWidth(InBlendWidth),
+		  ResultQueue(InQueue), WaterLevel(InWaterLevel), MaxHeightHint(InMaxHeightHint), HeightmapResolution(InHeightmapResolution),
+		  MaxTreeLOD(InMaxTreeLOD), Features(InFeatures)
 	{}
 
 	FORCEINLINE TStatId GetStatId() const
@@ -86,6 +81,9 @@ private:
 	int32 MaxHeightHint;
 	/** Number of cells per side for the LOD 3+ heightmap mesh (e.g. 4 = 4x4 = 32 tris). */
 	int32 HeightmapResolution;
+	int32 MaxTreeLOD;
+
+	TArray<TSharedPtr<const IVoxelFeatureGenerator, ESPMode::ThreadSafe>> Features;
 
 	// Helper functions for DoWork()
 	bool GenerateLOD3Heightmap(float ChunkWorldX, float ChunkWorldY, const FVoxelTerrainNoise::FCachedWorleyPoints& CachedPoints);

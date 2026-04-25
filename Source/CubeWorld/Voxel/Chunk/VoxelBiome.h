@@ -52,6 +52,10 @@ struct FVoxelBiomeParams
 	/** Block color (used for vertex coloring). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Visual")
 	FColor Color = FColor::White;
+
+	/** Probability of a tree spawning in a cell in this biome (0 to 1). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Biome|Trees", meta = (ClampMin = "0", ClampMax = "1"))
+	float TreeDensity = 0.0f;
 };
 
 /** Number of built-in biomes. */
@@ -91,6 +95,7 @@ inline TArray<FVoxelBiomeParams> GetDefaultBiomeParams()
 	Defaults[0].Lacunarity  = 2.0f;
 	Defaults[0].PowerCurve  = 8.0f;
 	Defaults[0].Color       = FColor(230, 240, 255);
+	Defaults[0].TreeDensity = 0.0f;
 
 	// ForestPlains – mostly flat with rare small mountains
 	Defaults[1].Name        = TEXT("Forest Plains");
@@ -101,6 +106,7 @@ inline TArray<FVoxelBiomeParams> GetDefaultBiomeParams()
 	Defaults[1].Lacunarity  = 2.0f;
 	Defaults[1].PowerCurve  = 8.0f;
 	Defaults[1].Color       = FColor(34, 139, 34);
+	Defaults[1].TreeDensity = 0.8f; // Lots of trees here
 
 	// Desert – very flat with minimal variation
 	Defaults[2].Name        = TEXT("Desert");
@@ -111,6 +117,7 @@ inline TArray<FVoxelBiomeParams> GetDefaultBiomeParams()
 	Defaults[2].Lacunarity  = 2.0f;
 	Defaults[2].PowerCurve  = 0.7f;
 	Defaults[2].Color       = FColor(210, 180, 100);
+	Defaults[2].TreeDensity = 0.0f;
 
 	return Defaults;
 }

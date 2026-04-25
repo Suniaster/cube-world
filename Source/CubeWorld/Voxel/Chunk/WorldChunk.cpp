@@ -19,7 +19,7 @@ AWorldChunk::AWorldChunk()
 // ── Chunk generation ────────────────────────────────────────────────────────
 
 
-void AWorldChunk::ApplyGeneratedMesh(const FIntVector& InKey, const FVoxelMeshData& InMeshData, const FVoxelMeshData& InWaterMeshData, UMaterialInterface* InMaterial, UMaterialInterface* InWaterMaterial, int32 InLODLevel)
+void AWorldChunk::ApplyGeneratedMesh(const FIntVector& InKey, const FVoxelMeshData& InHeightmapData, const TMap<uint8, FVoxelMeshData>& InBlockMeshes, UMaterialInterface* InMaterial, UMaterialInterface* InWaterMaterial, int32 InLODLevel)
 {
 	ChunkCoord = FIntPoint(InKey.X, InKey.Y);
 	ZLayer = InKey.Z;
@@ -32,8 +32,8 @@ void AWorldChunk::ApplyGeneratedMesh(const FIntVector& InKey, const FVoxelMeshDa
 
 	// Copy the mesh data into the VoxelObject
 	// Note: UVoxelObject::Spawn will clear it after GPU upload to save memory.
-	VoxelObject->GetMeshData() = InMeshData;
-	VoxelObject->GetWaterMeshData() = InWaterMeshData;
+	VoxelObject->GetHeightmapData() = InHeightmapData;
+	VoxelObject->GetBlockMeshes() = InBlockMeshes;
 
 	const bool bCreateCollision = (LODLevel == 0);
 	VoxelObject->Spawn(this, InMaterial, InWaterMaterial, bCreateCollision);

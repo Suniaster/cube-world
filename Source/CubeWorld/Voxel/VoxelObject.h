@@ -55,8 +55,7 @@ public:
 		const FVoxelGrid3D& Grid,
 		float VoxelSize,
 		TFunctionRef<FColor(uint8 BlockType, const FVector& Pos, const FVector& Normal)> ColorFunc,
-		FVoxelMeshData& OutSolidMeshData,
-		FVoxelMeshData& OutWaterMeshData,
+		TMap<uint8, FVoxelMeshData>& OutBlockMeshes,
 		const FVoxelNeighborMasks* NeighborMasks = nullptr);
 
 	/** Thread-safe static function to generate mesh data from a heightmap (LOD 3+). */
@@ -68,29 +67,31 @@ public:
 		float EffectiveVoxelSize,
 		float BaseVoxelSize,
 		FVoxelMeshData& OutMeshData);
+	
+	/** Converts generated mesh data (per-block-type maps) into a single baked StaticMesh at runtime. */
+	static class UStaticMesh* BakeToStaticMesh(const TMap<uint8, FVoxelMeshData>& BlockMeshes, UObject* Outer, FName Name);
 
 	/** Spawns or updates a procedural mesh component on the target actor. */
 	UFUNCTION(BlueprintCallable, Category = "Voxel")
 	UProceduralMeshComponent* Spawn(AActor* Owner, UMaterialInterface* Material, UMaterialInterface* WaterMaterial, bool bCreateCollision = true);
 
 	/** Returns the stored mesh data (const). */
-	const FVoxelMeshData& GetMeshData() const { return MeshData; }
+	const FVoxelMeshData& GetHeightmapData() const { return HeightmapData; }
 
 	/** Returns the stored mesh data (non-const). */
-	FVoxelMeshData& GetMeshData() { return MeshData; }
+	FVoxelMeshData& GetHeightmapData() { return HeightmapData; }
 
-	const FVoxelMeshData& GetWaterMeshData() const { return WaterMeshData; }
-	FVoxelMeshData& GetWaterMeshData() { return WaterMeshData; }
+	TMap<uint8, FVoxelMeshData>& GetBlockMeshes() { return BlockMeshes; }
 
 	/** Returns the spawned mesh component. */
 	UProceduralMeshComponent* GetMeshComponent() const { return MeshComponent; }
 
 private:
 	UPROPERTY()
-	FVoxelMeshData MeshData;
+	FVoxelMeshData HeightmapData;
 
 	UPROPERTY()
-	FVoxelMeshData WaterMeshData;
+	TMap<uint8, FVoxelMeshData> BlockMeshes;
 
 	UPROPERTY()
 	UProceduralMeshComponent* MeshComponent;

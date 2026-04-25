@@ -6,6 +6,8 @@
 #include "Engine/World.h"
 #include "Materials/Material.h"
 #include "ChunkGenerationTask.h"
+#include "../Features/VoxelTreePlacerFeature.h"
+#include "Engine/StaticMesh.h"
 
 #if WITH_EDITOR
 #include "Materials/MaterialExpressionVertexColor.h"
@@ -23,10 +25,55 @@ void AChunkWorldManager::BeginPlay()
 	Super::BeginPlay();
 
 	EnsureMaterial();
+	GenerateTreeArchetypes();
+
+	// Register active feature generators (placement-only, no voxel stamping)
+	ActiveFeatures.Add(MakeShared<FVoxelTreePlacerFeature, ESPMode::ThreadSafe>(TreeCellSize, 1500.0f, BaseTreeCount));
 
 	// Force an initial chunk load around origin
 	FIntPoint Origin(0, 0);
 	UpdateChunksAroundPlayer(Origin);
+}
+
+void AChunkWorldManager::GenerateTreeArchetypes()
+{
+	UMaterialInterface* UseMat = TreeMaterial ? TreeMaterial : (TerrainMaterial ? TerrainMaterial : CachedRuntimeMaterial);
+	if (!UseMat) return;
+
+	CachedBaseTrees.Empty();
+	BakedTreeMeshes.Empty();
+
+	const FColor WoodColor(101, 67, 33, 255);
+	const FColor LeavesColor(34, 139, 34, 255);
+
+	for (int32 i = 0; i < BaseTreeCount; ++i)
+	{
+		FVoxelTreeData TreeData = FTreeGenerator::GenerateTree(TreeParams, FMath::FloorToInt32(Seed) + i * 100);
+		
+		// Generate voxel mesh data for the tree archetype
+		UVoxelObject::GenerateMeshData(TreeData.Grid, VoxelSize,
+			[&](uint8 BlockType, const FVector& Pos, const FVector& Normal) -> FColor
+			{
+				return (BlockType == TREE_BLOCKTYPE_LEAVES) ? LeavesColor : WoodColor;
+			},
+			TreeData.BlockMeshes);
+		
+		// Bake the mesh data into a StaticMesh for high-performance instancing
+		FString MeshName = FString::Printf(TEXT("BakedTree_%d"), i);
+		UStaticMesh* BakedMesh = UVoxelObject::BakeToStaticMesh(TreeData.BlockMeshes, this, FName(*MeshName));
+		if (BakedMesh)
+		{
+			// Apply material to all sections (Wood and Leaves)
+			for (int32 s = 0; s < TreeData.BlockMeshes.Num(); ++s)
+			{
+				BakedMesh->GetStaticMaterials().Add(FStaticMaterial(UseMat));
+			}
+			
+			BakedTreeMeshes.Add(BakedMesh);
+			CachedBaseTrees.Add(TreeData);
+		}
+	}
+	UE_LOG(LogTemp, Warning, TEXT("Voxel: Generated %d tree archetypes and baked meshes."), BakedTreeMeshes.Num());
 }
 
 void AChunkWorldManager::EnsureMaterial()
@@ -161,15 +208,7 @@ void AChunkWorldManager::UpdateChunksAroundPlayer(FIntPoint PlayerChunk)
 	// Rebuild max-heap: lowest LOD (highest detail) + closest distance at the top.
 	// O(n) heapify replaces the previous O(n log n) Sort; between rebuilds each
 	// HeapPopDiscard in Tick costs only O(log n) instead of O(n).
-	ColumnWorkQueue.Heapify([this](const FIntPoint& A, const FIntPoint& B)
-	{
-		int32 LODA = ColumnLODs.FindRef(A);
-		int32 LODB = ColumnLODs.FindRef(B);
-		if (LODA != LODB) return LODA < LODB;
-		float DistA = FVector2D::DistSquared(FVector2D(A), FVector2D(HeapPlayerChunk));
-		float DistB = FVector2D::DistSquared(FVector2D(B), FVector2D(HeapPlayerChunk));
-		return DistA < DistB;
-	});
+	ColumnWorkQueue.Heapify([this](const FIntPoint& A, const FIntPoint& B) { return CompareColumnPriority(A, B); });
 }
 
 int32 AChunkWorldManager::CalculateLODForColumn(FIntPoint ColumnCoord, FIntPoint PlayerChunk) const
@@ -185,6 +224,16 @@ int32 AChunkWorldManager::CalculateLODForColumn(FIntPoint ColumnCoord, FIntPoint
 
 void AChunkWorldManager::UnloadChunkColumn(FIntPoint Coord)
 {
+	// Remove HISM instances for this column
+	if (FColumnTreeInstances* Instances = ColumnTreeInstances.Find(Coord))
+	{
+		for (UHierarchicalInstancedStaticMeshComponent* Comp : Instances->Components)
+		{
+			if (Comp) Comp->DestroyComponent();
+		}
+		ColumnTreeInstances.Remove(Coord);
+	}
+
 	// Use the cached max height to limit the Z scan; fall back to MaxZLayersLimit if unknown.
 	const int32 CachedMaxHeight = ColumnMaxHeightCache.FindRef(Coord);
 	const int32 MaxZLayers = (CachedMaxHeight > 0)
@@ -203,6 +252,7 @@ void AChunkWorldManager::UnloadChunkColumn(FIntPoint Coord)
 	}
 	InFlightTasks.Remove(Coord);
 	ColumnMaxHeightCache.Remove(Coord);
+
 
 	// If this column was part of a LOD 3 sector, evict it so the sector is rebuilt.
 	RemoveColumnFromSector(Coord);
@@ -234,7 +284,9 @@ void AChunkWorldManager::DispatchChunkTasks(FIntPoint Coord, int32 LODLevel)
 		&FinishedTasksQueue,
 		WaterLevel,
 		ColumnMaxHeightCache.FindRef(Coord),
-		HeightmapResolution
+		HeightmapResolution,
+		MaxTreeLOD,
+		ActiveFeatures
 	))->StartBackgroundTask();
 }
 
@@ -297,14 +349,12 @@ void AChunkWorldManager::FlushDirtySectors()
 {
 	EnsureMaterial();
 	UMaterialInterface* UseMat = TerrainMaterial ? TerrainMaterial : CachedRuntimeMaterial;
-	UMaterialInterface* UseWaterMat = WaterMaterial ? WaterMaterial : CachedRuntimeWaterMaterial;
 
 	for (auto& [SectorCoord, Sector] : HeightmapSectors)
 	{
 		if (!Sector.bDirty) continue;
 		Sector.bDirty = false;
 
-		// Merge all column meshes into one.
 		FVoxelMeshData Merged;
 		for (auto& [ColCoord, ColMesh] : Sector.ColumnData)
 		{
@@ -334,25 +384,35 @@ void AChunkWorldManager::FlushDirtySectors()
 
 		if (Sector.Actor)
 		{
-			// Use sector coord as the key; LOD 3 disables collision + lighting.
-			// Water is never present in heightmap (LOD 3) sectors, so pass an empty water mesh with no material.
+			// LOD 3 heightmap sectors never contain water — pass nullptr for the water material.
 			const FIntVector SectorKey(SectorCoord.X, SectorCoord.Y, 0);
-			Sector.Actor->ApplyGeneratedMesh(SectorKey, Merged, FVoxelMeshData{}, UseMat, nullptr, 3);
+			Sector.Actor->ApplyGeneratedMesh(SectorKey, Merged, TMap<uint8, FVoxelMeshData>{}, UseMat, nullptr, 3);
 		}
+	}
+}
+
+bool AChunkWorldManager::CompareColumnPriority(const FIntPoint& A, const FIntPoint& B) const
+{
+	const int32 LODA = ColumnLODs.FindRef(A);
+	const int32 LODB = ColumnLODs.FindRef(B);
+	if (LODA != LODB) return LODA < LODB;
+	const float DistA = FVector2D::DistSquared(FVector2D(A), FVector2D(HeapPlayerChunk));
+	const float DistB = FVector2D::DistSquared(FVector2D(B), FVector2D(HeapPlayerChunk));
+	return DistA < DistB;
+}
+
+void AChunkWorldManager::PostApplyChunk(const FChunkGenerationResult& Result, UMaterialInterface* Material)
+{
+	RemoveColumnFromSector(Result.ChunkCoord);
+	if (Result.ZLayer == 0 && Result.LODLevel <= MaxTreeLOD)
+	{
+		UpdateTreeInstancesForColumn(Result.ChunkCoord, Result.FeaturePlacements, Result.LODLevel);
 	}
 }
 
 void AChunkWorldManager::ProcessColumnWorkQueue()
 {
-	auto WorkQueueComp = [this](const FIntPoint& A, const FIntPoint& B)
-	{
-		int32 LODA = ColumnLODs.FindRef(A);
-		int32 LODB = ColumnLODs.FindRef(B);
-		if (LODA != LODB) return LODA < LODB;
-		float DistA = FVector2D::DistSquared(FVector2D(A), FVector2D(HeapPlayerChunk));
-		float DistB = FVector2D::DistSquared(FVector2D(B), FVector2D(HeapPlayerChunk));
-		return DistA < DistB;
-	};
+	auto WorkQueueComp = [this](const FIntPoint& A, const FIntPoint& B) { return CompareColumnPriority(A, B); };
 
 	int32 JobsProcessed = 0;
 	const int32 MaxConcurrentTasks = 64;
@@ -425,6 +485,76 @@ void AChunkWorldManager::ProcessFinishedTasks()
 	}
 }
 
+void AChunkWorldManager::UpdateTreeInstancesForColumn(FIntPoint Coord, const TArray<FFeaturePlacement>& Placements, int32 LODLevel)
+{
+	// Clear existing instances for this column
+	if (FColumnTreeInstances* OldInstances = ColumnTreeInstances.Find(Coord))
+	{
+		for (UHierarchicalInstancedStaticMeshComponent* Comp : OldInstances->Components)
+		{
+			if (Comp) Comp->DestroyComponent();
+		}
+		ColumnTreeInstances.Remove(Coord);
+	}
+
+	if (Placements.IsEmpty()) return;
+
+	// Instantiate and populate HISMs for the current chunk column
+	FColumnTreeInstances& NewInstances = ColumnTreeInstances.Add(Coord);
+	TMap<int32, UHierarchicalInstancedStaticMeshComponent*> LocalHISMs;
+
+	int32 AddedCount = 0;
+	for (const FFeaturePlacement& Placement : Placements)
+	{
+		if (!BakedTreeMeshes.IsValidIndex(Placement.ArchetypeIndex)) continue;
+		
+		UHierarchicalInstancedStaticMeshComponent** HISMBuffer = LocalHISMs.Find(Placement.ArchetypeIndex);
+		UHierarchicalInstancedStaticMeshComponent* HISM = HISMBuffer ? *HISMBuffer : nullptr;
+		
+		if (!HISM)
+		{
+			HISM = NewObject<UHierarchicalInstancedStaticMeshComponent>(this);
+			HISM->RegisterComponent();
+			HISM->SetStaticMesh(BakedTreeMeshes[Placement.ArchetypeIndex]);
+			
+			// Only LOD 0 trees have collision
+			const bool bHasCollision = (LODLevel == 0);
+			HISM->SetCollisionEnabled(bHasCollision ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
+			if (bHasCollision)
+			{
+				HISM->SetCollisionObjectType(ECC_WorldStatic);
+				HISM->SetCollisionResponseToAllChannels(ECR_Block);
+			}
+
+			HISM->AttachToComponent(GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
+			
+			LocalHISMs.Add(Placement.ArchetypeIndex, HISM);
+			NewInstances.Components.Add(HISM);
+		}
+
+		const FVoxelTreeData& Archetype = CachedBaseTrees[Placement.ArchetypeIndex];
+		FVector Pos = Placement.WorldPosition;
+		Pos.X -= Archetype.CenterOffset.X * VoxelSize;
+		Pos.Y -= Archetype.CenterOffset.Y * VoxelSize;
+		Pos.Z -= Archetype.CenterOffset.Z * VoxelSize;
+
+		FTransform Transform(FRotator::ZeroRotator, Pos);
+		HISM->AddInstance(Transform, false); // Don't rebuild yet
+		AddedCount++;
+	}
+
+	// Mark components for render update once batching is complete
+	for (auto& Pair : LocalHISMs)
+	{
+		Pair.Value->MarkRenderStateDirty();
+	}
+
+	if (AddedCount > 0)
+	{
+		UE_LOG(LogTemp, Verbose, TEXT("Voxel: Added %d tree instances to column (%d, %d) at LOD %d"), AddedCount, Coord.X, Coord.Y, LODLevel);
+	}
+}
+
 void AChunkWorldManager::HandleHeightmapResult(const FChunkGenerationResult& Result, TArray<AWorldChunk*>& OutPendingDestroy)
 {
 	// Defer eviction of old Z-layer voxel actors until after FlushDirtySectors()
@@ -442,7 +572,7 @@ void AChunkWorldManager::HandleHeightmapResult(const FChunkGenerationResult& Res
 
 	if (Result.bSuccess && Result.bHasAnyBlocks)
 	{
-		AccumulateHeightmapColumn(Result.ChunkCoord, const_cast<FVoxelMeshData&&>(Result.MeshData));
+		AccumulateHeightmapColumn(Result.ChunkCoord, const_cast<FVoxelMeshData&&>(Result.HeightmapData));
 	}
 	else
 	{
@@ -456,7 +586,7 @@ bool AChunkWorldManager::HandleVoxelResult(const FChunkGenerationResult& Result)
 	UMaterialInterface* UseMat = TerrainMaterial ? TerrainMaterial : CachedRuntimeMaterial;
 	UMaterialInterface* UseWaterMat = WaterMaterial ? WaterMaterial : CachedRuntimeWaterMaterial;
 
-	FIntVector Key(Result.ChunkCoord.X, Result.ChunkCoord.Y, Result.ZLayer);
+	const FIntVector Key(Result.ChunkCoord.X, Result.ChunkCoord.Y, Result.ZLayer);
 
 	if (Result.bSuccess && Result.bHasAnyBlocks)
 	{
@@ -464,34 +594,29 @@ bool AChunkWorldManager::HandleVoxelResult(const FChunkGenerationResult& Result)
 		AWorldChunk** ExistingChunkPtr = LoadedChunks.Find(Key);
 		if (ExistingChunkPtr && *ExistingChunkPtr)
 		{
-			(*ExistingChunkPtr)->ApplyGeneratedMesh(Key, Result.MeshData, Result.WaterMeshData, UseMat, UseWaterMat, Result.LODLevel);
-			RemoveColumnFromSector(Result.ChunkCoord);
+			(*ExistingChunkPtr)->ApplyGeneratedMesh(Key, Result.HeightmapData, Result.BlockMeshes, UseMat, UseWaterMat, Result.LODLevel);
+			PostApplyChunk(Result, UseMat);
 			return true;
 		}
-		else
+
+		// Spawn new chunk actor
+		FActorSpawnParameters SpawnParams;
+		SpawnParams.Owner = this;
+
+		const FVector ChunkLocation(
+			static_cast<float>(Result.ChunkCoord.X) * ChunkSize * VoxelSize,
+			static_cast<float>(Result.ChunkCoord.Y) * ChunkSize * VoxelSize,
+			static_cast<float>(Result.ZLayer) * ChunkHeight * VoxelSize);
+
+		AWorldChunk* NewChunk = GetWorld()->SpawnActor<AWorldChunk>(
+			AWorldChunk::StaticClass(), ChunkLocation, FRotator::ZeroRotator, SpawnParams);
+
+		if (NewChunk)
 		{
-			// Spawn new chunk actor
-			FActorSpawnParameters SpawnParams;
-			SpawnParams.Owner = this;
-
-			const float ChunkWorldX = static_cast<float>(Result.ChunkCoord.X) * ChunkSize * VoxelSize;
-			const float ChunkWorldY = static_cast<float>(Result.ChunkCoord.Y) * ChunkSize * VoxelSize;
-			const float ChunkWorldZ = static_cast<float>(Result.ZLayer) * ChunkHeight * VoxelSize;
-			FVector ChunkLocation(ChunkWorldX, ChunkWorldY, ChunkWorldZ);
-
-			AWorldChunk* NewChunk = GetWorld()->SpawnActor<AWorldChunk>(
-				AWorldChunk::StaticClass(),
-				ChunkLocation,
-				FRotator::ZeroRotator,
-				SpawnParams);
-
-			if (NewChunk)
-			{
-				NewChunk->ApplyGeneratedMesh(Key, Result.MeshData, Result.WaterMeshData, UseMat, UseWaterMat, Result.LODLevel);
-				LoadedChunks.Add(Key, NewChunk);
-				RemoveColumnFromSector(Result.ChunkCoord);
-				return true;
-			}
+			NewChunk->ApplyGeneratedMesh(Key, Result.HeightmapData, Result.BlockMeshes, UseMat, UseWaterMat, Result.LODLevel);
+			LoadedChunks.Add(Key, NewChunk);
+			PostApplyChunk(Result, UseMat);
+			return true;
 		}
 	}
 	else
