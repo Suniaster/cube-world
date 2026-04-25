@@ -43,7 +43,9 @@ protected:
 
 	/** Vertical height of each chunk layer in voxel rows. Chunks stack vertically as needed. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Chunks")
-	int32 ChunkHeight = 64;
+	int32 ChunkHeight = 256;
+
+
 
 	/** World-space size of one cube in UU. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Chunks")

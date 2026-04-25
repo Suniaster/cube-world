@@ -11,7 +11,7 @@ struct FGreedyQuad
 	uint32 X, Y, W, H;
 };
 
-static TArray<FGreedyQuad> GreedyMeshBinaryPlane(TArray<uint64>& Data, int32 PlaneHeight)
+static TArray<FGreedyQuad> GreedyMeshBinaryPlane(TArray<FBitMask256>& Data, int32 PlaneHeight)
 {
 	TArray<FGreedyQuad> GreedyQuads;
 	for (int32 Row = 0; Row < Data.Num(); ++Row)
@@ -20,38 +20,37 @@ static TArray<FGreedyQuad> GreedyMeshBinaryPlane(TArray<uint64>& Data, int32 Pla
 		while (Y < PlaneHeight)
 		{
 			// Find first solid bit
-			uint64 Bits = (Y < 64) ? (Data[Row] >> Y) : 0;
-			if (Bits == 0)
+			FBitMask256 Bits = Data[Row].ShiftRightBy(Y);
+			if (Bits.IsZero())
 			{
 				Y = PlaneHeight;
 				continue;
 			}
 
 			// FFS (Find First Set)
-			int32 SetBit = FMath::CountTrailingZeros64(Bits);
+			int32 SetBit = Bits.CTZ();
 			Y += SetBit;
 
 			if (Y >= PlaneHeight) break;
 
 			// Count consecutive ones
 			int32 H = 0;
-			uint64 TempBits = Data[Row] >> Y;
-			while (TempBits & 1)
+			FBitMask256 TempBits = Data[Row].ShiftRightBy(Y);
+			while (TempBits.GetBit(0))
 			{
 				H++;
-				TempBits >>= 1;
+				TempBits = TempBits.ShiftRight1();
 				if (Y + H >= PlaneHeight) break;
-				if (Y + H >= 64) break; // uint64 limit
 			}
 
-			uint64 HAsMask = (H == 64) ? ~0ULL : ((1ULL << H) - 1);
-			uint64 Mask = HAsMask << Y;
+			FBitMask256 HAsMask = FBitMask256::MakeLowMask(H);
+			FBitMask256 Mask = HAsMask.ShiftLeftBy(Y);
 
 			// Grow horizontally
 			int32 W = 1;
 			while (Row + W < Data.Num())
 			{
-				uint64 NextRowH = (Data[Row + W] >> Y) & HAsMask;
+				FBitMask256 NextRowH = Data[Row + W].ShiftRightBy(Y) & HAsMask;
 				if (NextRowH != HAsMask) break;
 
 				// Clear the bits we're expanding into
@@ -66,6 +65,8 @@ static TArray<FGreedyQuad> GreedyMeshBinaryPlane(TArray<uint64>& Data, int32 Pla
 	return GreedyQuads;
 }
 
+
+
 UVoxelObject::UVoxelObject()
 	: MeshComponent(nullptr)
 {
@@ -79,12 +80,13 @@ void UVoxelObject::GenerateMeshData(const FVoxelGrid3D& Grid, float VoxelSize, T
 	if (GridSize.X <= 0 || GridSize.Y <= 0 || GridSize.Z <= 0) return;
 
 	// 1. Column Mask Generation
-	TArray<uint64> SolidAxisCols[3];
-	TArray<uint64> WaterAxisCols[3];
+	TArray<FBitMask256> SolidAxisCols[3];
+	TArray<FBitMask256> WaterAxisCols[3];
+
 	const int32 AXIS_Z = 0;
 	const int32 AXIS_X = 1;
 	const int32 AXIS_Y = 2;
-	TArray<uint64> AxisSizes;
+	TArray<int32> AxisSizes;
 	AxisSizes.Add(GridSize.X * GridSize.Y); // Z axis 
 	AxisSizes.Add(GridSize.Y * GridSize.Z); // X axis 
 	AxisSizes.Add(GridSize.Z * GridSize.X); // Y axis 
@@ -95,27 +97,30 @@ void UVoxelObject::GenerateMeshData(const FVoxelGrid3D& Grid, float VoxelSize, T
 		WaterAxisCols[i].SetNumZeroed(AxisSizes[i]);
 	}
 
-	for (uint64 Z = 0; Z < GridSize.Z; ++Z)
+	for (int32 Z = 0; Z < GridSize.Z; ++Z)
 	{
-		for (uint64 Y = 0; Y < GridSize.Y; ++Y)
+		for (int32 Y = 0; Y < GridSize.Y; ++Y)
 		{
-			for (uint64 X = 0; X < GridSize.X; ++X)
+			for (int32 X = 0; X < GridSize.X; ++X)
 			{
 				uint8 BlockType = Grid.GetVoxel(X, Y, Z);
 				if (BlockType != 0)
 				{
-					TArray<uint64>* Cols = (BlockType == BLOCKTYPE_WATER) ? WaterAxisCols : SolidAxisCols;
-					Cols[AXIS_Z][X + Y * GridSize.X] |= (1ULL << Z);
-					Cols[AXIS_X][Y + Z * GridSize.Y] |= (1ULL << X);
-					Cols[AXIS_Y][Z + X * GridSize.Z] |= (1ULL << Y);
+					TArray<FBitMask256>* Cols = (BlockType == BLOCKTYPE_WATER) ? WaterAxisCols : SolidAxisCols;
+					Cols[AXIS_Z][X + Y * GridSize.X].SetBit(Z);
+
+					Cols[AXIS_X][Y + Z * GridSize.Y].SetBit(X);
+					Cols[AXIS_Y][Z + X * GridSize.Z].SetBit(Y);
 				}
 			}
 		}
 	}
 
+
 	// 2. Face Culling
-	TArray<uint64> ColFaceMasks[3][2];
+	TArray<FBitMask256> ColFaceMasks[3][2];
 	for (int32 Axis = 0; Axis < 3; ++Axis)
+
 	{
 		ColFaceMasks[Axis][0].SetNumZeroed(AxisSizes[Axis]);
 		ColFaceMasks[Axis][1].SetNumZeroed(AxisSizes[Axis]);
@@ -124,9 +129,10 @@ void UVoxelObject::GenerateMeshData(const FVoxelGrid3D& Grid, float VoxelSize, T
 		
 		for (int32 i = 0; i < AxisSizes[Axis]; ++i)
 		{
-			const uint64 SolidCol = SolidAxisCols[Axis][i];
-			const uint64 WaterCol = WaterAxisCols[Axis][i];
+			const FBitMask256 SolidCol = SolidAxisCols[Axis][i];
+			const FBitMask256 WaterCol = WaterAxisCols[Axis][i];
 			uint64 SNegBit = 0, SPosBit = 0, WNegBit = 0, WPosBit = 0;
+
 
 			if (NeighborMasks)
 			{
@@ -142,21 +148,24 @@ void UVoxelObject::GenerateMeshData(const FVoxelGrid3D& Grid, float VoxelSize, T
 			}
 
 			// Solid culling: Solid faces are only culled by other solid blocks
-			const uint64 SNegMask = SolidCol << 1 | SNegBit;
-			const uint64 SPosMask = SolidCol >> 1 | (SPosBit << (AxisDim - 1));
+			const FBitMask256 SNegMask = SolidCol.ShiftLeft1().OrLowBit(SNegBit);
+			const FBitMask256 SPosMask = SolidCol.ShiftRight1().OrHighBit(SPosBit, AxisDim);
 			
 			// Water culling: Water faces are culled by ANY block (solid or water)
-			const uint64 AnyCol = SolidCol | WaterCol;
-			const uint64 AnyNegMask = AnyCol << 1 | (SNegBit | WNegBit);
-			const uint64 AnyPosMask = AnyCol >> 1 | ((SPosBit | WPosBit) << (AxisDim - 1));
+			const FBitMask256 AnyCol = SolidCol | WaterCol;
+			const FBitMask256 AnyNegMask = AnyCol.ShiftLeft1().OrLowBit(SNegBit | WNegBit);
+			const FBitMask256 AnyPosMask = AnyCol.ShiftRight1().OrHighBit(SPosBit | WPosBit, AxisDim);
+
 
 			ColFaceMasks[Axis][0][i] = (SolidCol & ~SNegMask) | (WaterCol & ~AnyNegMask);
 			ColFaceMasks[Axis][1][i] = (SolidCol & ~SPosMask) | (WaterCol & ~AnyPosMask);
 		}
 	}
 
+
 	// 3. Greedy Meshing Planes
-	TMap<uint8, TMap<int32, TArray<uint64>>> PlaneGroups[6]; // [face] -> BlockType -> (AxisPos -> PlaneData)
+	TMap<uint8, TMap<int32, TArray<FBitMask256>>> PlaneGroups[6]; // [face] -> BlockType -> (AxisPos -> PlaneData)
+
 
 	for (int32 FaceIdx = 0; FaceIdx < 6; ++FaceIdx)
 	{
@@ -170,12 +179,13 @@ void UVoxelObject::GenerateMeshData(const FVoxelGrid3D& Grid, float VoxelSize, T
 		{
 			for (int32 V1 = 0; V1 < Dim1Size; ++V1)
 			{
-				uint64 Col = ColFaceMasks[Axis][Direction][V1 + V2 * Dim1Size];
+				FBitMask256 Col = ColFaceMasks[Axis][Direction][V1 + V2 * Dim1Size];
 
-				while (Col != 0)
+
+				while (!Col.IsZero())
 				{
-					int32 V3 = FMath::CountTrailingZeros64(Col);
-					Col &= Col - 1; 
+					int32 V3 = Col.CTZ();
+					Col = Col.ClearLowestBit();
 
 					FIntVector VoxelPos;
 					if (Axis == 0)      VoxelPos = FIntVector(V1, V2, V3);
@@ -184,13 +194,15 @@ void UVoxelObject::GenerateMeshData(const FVoxelGrid3D& Grid, float VoxelSize, T
 
 					uint8 BlockType = Grid.GetVoxel(VoxelPos.X, VoxelPos.Y, VoxelPos.Z);
 					
-					TArray<uint64>& Plane = PlaneGroups[FaceIdx].FindOrAdd(BlockType).FindOrAdd(V3);
+					TArray<FBitMask256>& Plane = PlaneGroups[FaceIdx].FindOrAdd(BlockType).FindOrAdd(V3);
 					if (Plane.Num() == 0) Plane.SetNumZeroed(Dim1Size);
-					Plane[V1] |= (1ULL << V2);
+					Plane[V1].SetBit(V2);
+
 				}
 			}
 		}
 	}
+
 
 	// 4. Generate Quads and Add to Mesh
 	auto AddQuad = [&](const FGreedyQuad& Quad, int32 AxisPos, int32 FaceIdx, uint8 BlockType)
