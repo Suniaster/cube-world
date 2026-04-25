@@ -1,0 +1,7 @@
+- Find unused code and remove it.
+- Find performance issues.
+- Review readability and cleanliness of the code.
+- Dont be afraid to delete code if necessary.
+- Find if there is a better pattern or archtecture for the same implementation.
+- Verify if there is a simplier way for this implementation
+- Verify if there is a more generic way for the implementation to make adding things in the future easier
