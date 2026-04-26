@@ -3,10 +3,23 @@
 #include "Engine/StaticMesh.h"
 #include "VoxelObject.h"
 #include "Trees/TreeGenerator.h"
+#include "Components/ExponentialHeightFogComponent.h"
+#include "Components/SkyAtmosphereComponent.h"
+#include "Components/VolumetricCloudComponent.h"
+#include "Engine/ExponentialHeightFog.h"
+#include "Components/DirectionalLightComponent.h"
+#include "Engine/DirectionalLight.h"
+#include "EngineUtils.h"
 
 UWorldManager::UWorldManager()
 {
 	PrimaryComponentTick.bCanEverTick = false;
+}
+
+void UWorldManager::BeginPlay()
+{
+	Super::BeginPlay();
+	InitializeEnvironment();
 }
 
 void UWorldManager::GenerateArchetypes(const FVoxelTreeParams& TreeParams, int32 BaseCount, float Seed, float VoxelSize, UMaterialInterface* Material)
@@ -175,4 +188,77 @@ void UWorldManager::Shutdown()
 	
 	BakedMeshes.Empty();
 	CachedArchetypes.Empty();
+}
+
+void UWorldManager::InitializeEnvironment()
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	// 1. Exponential Height Fog
+	AExponentialHeightFog* Fog = nullptr;
+	for (TActorIterator<AExponentialHeightFog> It(World); It; ++It) { Fog = *It; break; }
+	if (!Fog)
+	{
+		Fog = World->SpawnActor<AExponentialHeightFog>();
+	}
+	if (Fog && Fog->GetComponent())
+	{
+		Fog->GetComponent()->FogDensity = 0.02f;
+		Fog->GetComponent()->FogHeightFalloff = 0.2f;
+		Fog->GetComponent()->bEnableVolumetricFog = true;
+		Fog->GetComponent()->VolumetricFogScatteringDistribution = 0.8f;
+		Fog->GetComponent()->VolumetricFogExtinctionScale = 2.0f;
+	}
+
+	// 2. Sky Atmosphere
+	AActor* SkyActor = nullptr;
+	for (TActorIterator<AActor> It(World); It; ++It)
+	{
+		if (It->FindComponentByClass<USkyAtmosphereComponent>()) { SkyActor = *It; break; }
+	}
+	if (!SkyActor)
+	{
+		SkyActor = World->SpawnActor<AActor>(AActor::StaticClass());
+		if (SkyActor)
+		{
+			USkyAtmosphereComponent* SkyComp = NewObject<USkyAtmosphereComponent>(SkyActor);
+			SkyComp->RegisterComponent();
+			SkyActor->SetRootComponent(SkyComp);
+		}
+	}
+
+	// 3. Volumetric Clouds
+	AActor* CloudActor = nullptr;
+	for (TActorIterator<AActor> It(World); It; ++It)
+	{
+		if (It->FindComponentByClass<UVolumetricCloudComponent>()) { CloudActor = *It; break; }
+	}
+	if (!CloudActor)
+	{
+		CloudActor = World->SpawnActor<AActor>(AActor::StaticClass());
+		if (CloudActor)
+		{
+			UVolumetricCloudComponent* CloudComp = NewObject<UVolumetricCloudComponent>(CloudActor);
+			CloudComp->RegisterComponent();
+			CloudActor->SetRootComponent(CloudComp);
+		}
+	}
+
+	// 4. Directional Light (ensure it casts cloud shadows)
+	ADirectionalLight* Sun = nullptr;
+	for (TActorIterator<ADirectionalLight> It(World); It; ++It) { Sun = *It; break; }
+	if (Sun)
+	{
+		if (UDirectionalLightComponent* SunComp = Cast<UDirectionalLightComponent>(Sun->GetLightComponent()))
+		{
+			SunComp->bCastCloudShadows = true;
+			SunComp->bCastModulatedShadows = true;
+			SunComp->Intensity = 10.0f;
+
+			// Enable Far Shadows for the HISMs
+			SunComp->FarShadowCascadeCount = 4;
+			SunComp->FarShadowDistance = 1000000.0f; // 10km
+		}
+	}
 }

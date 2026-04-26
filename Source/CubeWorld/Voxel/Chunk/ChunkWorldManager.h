@@ -60,7 +60,7 @@ protected:
 	/** Number of cells per side for the LOD 3+ heightmap mesh.
 	 *  1 = 1x1 cell = 2 triangles per distant chunk. Max 32. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|LOD", meta = (ClampMin = "1", ClampMax = "32"))
-	int32 HeightmapResolution = 1;
+	int32 HeightmapResolution = 4;
 
 	/** How many LOD-3 chunk columns to merge into a single draw call (per side).
 	 *  8 = 8x8 = 64 columns per actor → ~RenderDistance²/64 draw calls instead of RenderDistance². */
@@ -120,8 +120,8 @@ protected:
 	float TreeCellSize = 3500.0f;
 
 	/** Maximum LOD level at which trees will still be generated and spawned. 0 = LOD 0 only. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Trees", meta = (ClampMin = "0", ClampMax = "2"))
-	int32 MaxTreeLOD = 2;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Trees", meta = (ClampMin = "0", ClampMax = "3"))
+	int32 MaxTreeLOD = 3;
 
 private:
 	/** Manages all non-voxel world objects (trees, structures). */

@@ -13,6 +13,9 @@
 #if WITH_EDITOR
 #include "Materials/MaterialExpressionVertexColor.h"
 #include "Materials/MaterialExpressionConstant.h"
+#include "Materials/MaterialExpressionNoise.h"
+#include "Materials/MaterialExpressionMultiply.h"
+#include "Materials/MaterialExpressionAdd.h"
 #endif
 
 AChunkWorldManager::AChunkWorldManager()
@@ -60,13 +63,26 @@ void AChunkWorldManager::EnsureMaterial()
 		// Create a DefaultLit material that uses vertex color for biome coloring
 		UMaterial* NewMat = NewObject<UMaterial>(GetTransientPackage(), TEXT("M_VoxelTerrain_Runtime"));
 
-		// Vertex Color node → Base Color
+		// Vertex Color node → base biome color
 		UMaterialExpressionVertexColor* VertColorExpr = NewObject<UMaterialExpressionVertexColor>(NewMat);
 		NewMat->GetExpressionCollection().AddExpression(VertColorExpr);
 
+		// Macro Variation Noise
+		UMaterialExpressionNoise* NoiseExpr = NewObject<UMaterialExpressionNoise>(NewMat);
+		NoiseExpr->Scale = 0.0001f;     // Very large scale for macro variation
+		NoiseExpr->OutputMin = 0.75f;    // Moderate darkening
+		NoiseExpr->OutputMax = 1.1f;     // Slight brightening
+		NewMat->GetExpressionCollection().AddExpression(NoiseExpr);
+
+		// Multiply (Biome Color * Noise)
+		UMaterialExpressionMultiply* MultiplyExpr = NewObject<UMaterialExpressionMultiply>(NewMat);
+		MultiplyExpr->A.Expression = VertColorExpr;
+		MultiplyExpr->B.Expression = NoiseExpr;
+		NewMat->GetExpressionCollection().AddExpression(MultiplyExpr);
+
 		if (UMaterialEditorOnlyData* EditorData = NewMat->GetEditorOnlyData())
 		{
-			EditorData->BaseColor.Expression = VertColorExpr;
+			EditorData->BaseColor.Expression = MultiplyExpr;
 		}
 
 		NewMat->PreEditChange(nullptr);

@@ -28,6 +28,10 @@ class CUBEWORLD_API UWorldManager : public UActorComponent
 public:
 	UWorldManager();
 
+protected:
+	virtual void BeginPlay() override;
+
+public:
 	/** Generates and bakes archetypes into static meshes. */
 	void GenerateArchetypes(const FVoxelTreeParams& TreeParams, int32 BaseCount, float Seed, float VoxelSize, UMaterialInterface* Material);
 
@@ -39,6 +43,9 @@ public:
 
 	/** Clears all pools and registries. */
 	void Shutdown();
+
+	/** Spawns and configures atmospheric actors (Fog, Atmosphere, Clouds). */
+	void InitializeEnvironment();
 
 protected:
 	/** Global HISM pools mapped by ArchetypeIndex. */
