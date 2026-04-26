@@ -14,8 +14,8 @@ class AWorldChunk;
 /** Tracks HISM components belonging to a specific column. */
 struct FColumnTreeInstances
 {
-	/** One HISM component per archetype, created locally for this column. */
-	TArray<UHierarchicalInstancedStaticMeshComponent*> Components;
+	/** HISM components mapped by archetype index. Created locally for this column. */
+	TMap<int32, UHierarchicalInstancedStaticMeshComponent*> Components;
 };
 
 /**
@@ -188,6 +188,9 @@ private:
 
 	/** Pre-generates tree archetypes and bakes their meshes once. */
 	void GenerateTreeArchetypes();
+
+	/** Clears all tree instances for a specific column without destroying the components. */
+	void ClearTreeInstancesForColumn(FIntPoint Coord);
 
 	/** Adds instances to HISM for a column based on FeaturePlacements. */
 	void UpdateTreeInstancesForColumn(FIntPoint Coord, const TArray<FFeaturePlacement>& Placements, int32 LODLevel);

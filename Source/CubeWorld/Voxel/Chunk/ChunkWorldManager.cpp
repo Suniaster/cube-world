@@ -229,9 +229,9 @@ void AChunkWorldManager::UnloadChunkColumn(FIntPoint Coord)
 	// Remove HISM instances for this column
 	if (FColumnTreeInstances* Instances = ColumnTreeInstances.Find(Coord))
 	{
-		for (UHierarchicalInstancedStaticMeshComponent* Comp : Instances->Components)
+		for (auto& Pair : Instances->Components)
 		{
-			if (Comp) Comp->DestroyComponent();
+			if (Pair.Value) Pair.Value->DestroyComponent();
 		}
 		ColumnTreeInstances.Remove(Coord);
 	}
@@ -406,7 +406,7 @@ bool AChunkWorldManager::CompareColumnPriority(const FIntPoint& A, const FIntPoi
 void AChunkWorldManager::PostApplyChunk(const FChunkGenerationResult& Result, UMaterialInterface* Material)
 {
 	RemoveColumnFromSector(Result.ChunkCoord);
-	if (Result.ZLayer == 0 && Result.LODLevel <= MaxTreeLOD)
+	if (Result.ZLayer == 0)
 	{
 		UpdateTreeInstancesForColumn(Result.ChunkCoord, Result.FeaturePlacements, Result.LODLevel);
 	}
@@ -487,39 +487,60 @@ void AChunkWorldManager::ProcessFinishedTasks()
 	}
 }
 
+void AChunkWorldManager::ClearTreeInstancesForColumn(FIntPoint Coord)
+{
+	if (FColumnTreeInstances* Instances = ColumnTreeInstances.Find(Coord))
+	{
+		for (auto& Pair : Instances->Components)
+		{
+			if (Pair.Value)
+			{
+				Pair.Value->ClearInstances();
+			}
+		}
+	}
+}
+
 void AChunkWorldManager::UpdateTreeInstancesForColumn(FIntPoint Coord, const TArray<FFeaturePlacement>& Placements, int32 LODLevel)
 {
-	// Clear existing instances for this column
-	if (FColumnTreeInstances* OldInstances = ColumnTreeInstances.Find(Coord))
+	// 1. If we already have HISMs for this column, just clear their instances for reuse.
+	// This is MUCH faster than destroying/recreating components.
+	FColumnTreeInstances* TargetInstances = ColumnTreeInstances.Find(Coord);
+	if (TargetInstances)
 	{
-		for (UHierarchicalInstancedStaticMeshComponent* Comp : OldInstances->Components)
+		for (auto& Pair : TargetInstances->Components)
 		{
-			if (Comp) Comp->DestroyComponent();
+			if (Pair.Value)
+			{
+				Pair.Value->ClearInstances();
+				Pair.Value->MarkRenderStateDirty();
+			}
 		}
-		ColumnTreeInstances.Remove(Coord);
 	}
 
 	if (Placements.IsEmpty()) return;
 
-	// Instantiate and populate HISMs for the current chunk column
-	FColumnTreeInstances& NewInstances = ColumnTreeInstances.Add(Coord);
-	TMap<int32, UHierarchicalInstancedStaticMeshComponent*> LocalHISMs;
+	// 2. If no entry exists yet, create it.
+	if (!TargetInstances)
+	{
+		TargetInstances = &ColumnTreeInstances.Add(Coord);
+	}
 
 	int32 AddedCount = 0;
+	const bool bHasCollision = (LODLevel == 0);
+
 	for (const FFeaturePlacement& Placement : Placements)
 	{
 		if (!BakedTreeMeshes.IsValidIndex(Placement.ArchetypeIndex)) continue;
-		
-		UHierarchicalInstancedStaticMeshComponent** HISMBuffer = LocalHISMs.Find(Placement.ArchetypeIndex);
-		UHierarchicalInstancedStaticMeshComponent* HISM = HISMBuffer ? *HISMBuffer : nullptr;
-		
+
+		UHierarchicalInstancedStaticMeshComponent* HISM = TargetInstances->Components.FindRef(Placement.ArchetypeIndex);
+
 		if (!HISM)
 		{
 			HISM = NewObject<UHierarchicalInstancedStaticMeshComponent>(this);
 			HISM->SetStaticMesh(BakedTreeMeshes[Placement.ArchetypeIndex]);
-			
+
 			// Only LOD 0 trees have collision
-			const bool bHasCollision = (LODLevel == 0);
 			HISM->bAlwaysCreatePhysicsState = bHasCollision;
 			HISM->SetCollisionEnabled(bHasCollision ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
 			if (bHasCollision)
@@ -530,9 +551,17 @@ void AChunkWorldManager::UpdateTreeInstancesForColumn(FIntPoint Coord, const TAr
 
 			HISM->AttachToComponent(GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
 			HISM->RegisterComponent();
-			
-			LocalHISMs.Add(Placement.ArchetypeIndex, HISM);
-			NewInstances.Components.Add(HISM);
+
+			TargetInstances->Components.Add(Placement.ArchetypeIndex, HISM);
+		}
+		else
+		{
+			// Update collision settings if LOD changed but we are reusing the component
+			if (HISM->GetCollisionEnabled() != (bHasCollision ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision))
+			{
+				HISM->SetCollisionEnabled(bHasCollision ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
+				HISM->bAlwaysCreatePhysicsState = bHasCollision;
+			}
 		}
 
 		const FVoxelTreeData& Archetype = CachedBaseTrees[Placement.ArchetypeIndex];
@@ -542,26 +571,32 @@ void AChunkWorldManager::UpdateTreeInstancesForColumn(FIntPoint Coord, const TAr
 		Pos.Z -= Archetype.CenterOffset.Z * VoxelSize;
 
 		FTransform Transform(FRotator::ZeroRotator, Pos);
-		HISM->AddInstance(Transform, false); 
+		HISM->AddInstance(Transform, false);
 		AddedCount++;
 	}
 
-	// Finalize instances and rebuild cluster tree for collision/culling
-	for (auto& Pair : LocalHISMs)
+	// 3. Mark dirty to trigger a re-render. 
+	// Removed synchronous BuildTreeIfOutdated(true, true) and RecreatePhysicsState()
+	// as they cause massive lag spikes. UE will handle the updates lazily/optimally.
+	for (auto& Pair : TargetInstances->Components)
 	{
-		Pair.Value->MarkRenderStateDirty();
-		Pair.Value->BuildTreeIfOutdated(true, true);
-		Pair.Value->RecreatePhysicsState();
+		if (Pair.Value)
+		{
+			Pair.Value->MarkRenderStateDirty();
+		}
 	}
 
 	if (AddedCount > 0)
 	{
-		UE_LOG(LogTemp, Verbose, TEXT("Voxel: Added %d tree instances to column (%d, %d) at LOD %d"), AddedCount, Coord.X, Coord.Y, LODLevel);
+		UE_LOG(LogTemp, Verbose, TEXT("Voxel: Updated %d tree instances in column (%d, %d) at LOD %d"), AddedCount, Coord.X, Coord.Y, LODLevel);
 	}
 }
 
 void AChunkWorldManager::HandleHeightmapResult(const FChunkGenerationResult& Result, TArray<AWorldChunk*>& OutPendingDestroy)
 {
+	// Ensure tree instances are cleared for heightmap LODs (LOD 3+)
+	ClearTreeInstancesForColumn(Result.ChunkCoord);
+
 	// Defer eviction of old Z-layer voxel actors until after FlushDirtySectors()
 	// uploads the replacement sector mesh. This prevents a 1-frame visibility gap.
 	for (int32 Z = 0; Z < MaxZLayersLimit; ++Z)
