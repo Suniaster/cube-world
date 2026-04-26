@@ -528,6 +528,7 @@ void AChunkWorldManager::UpdateTreeInstancesForColumn(FIntPoint Coord, const TAr
 
 	int32 AddedCount = 0;
 	const bool bHasCollision = (LODLevel == 0);
+	const bool bCastShadow = (LODLevel <= 1);
 
 	for (const FFeaturePlacement& Placement : Placements)
 	{
@@ -549,6 +550,16 @@ void AChunkWorldManager::UpdateTreeInstancesForColumn(FIntPoint Coord, const TAr
 				HISM->SetCollisionResponseToAllChannels(ECR_Block);
 			}
 
+			// Trees up to LOD 2 have shadows
+			HISM->SetCastShadow(bCastShadow);
+			HISM->bCastDynamicShadow = bCastShadow;
+			HISM->bCastFarShadow = bCastShadow;
+			HISM->bCastInsetShadow = bCastShadow;
+			HISM->bAffectDynamicIndirectLighting = bCastShadow;
+			HISM->bAffectDistanceFieldLighting = bCastShadow;
+			HISM->bVisibleInRayTracing = bCastShadow;
+			HISM->SetBoundsScale(5.0f); // Increase bounds scale to prevent premature shadow culling for small tree clusters
+
 			HISM->AttachToComponent(GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
 			HISM->RegisterComponent();
 
@@ -561,6 +572,19 @@ void AChunkWorldManager::UpdateTreeInstancesForColumn(FIntPoint Coord, const TAr
 			{
 				HISM->SetCollisionEnabled(bHasCollision ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
 				HISM->bAlwaysCreatePhysicsState = bHasCollision;
+			}
+
+			// Update shadow settings if LOD changed but we are reusing the component
+			if (HISM->CastShadow != bCastShadow)
+			{
+				HISM->SetCastShadow(bCastShadow);
+				HISM->bCastDynamicShadow = bCastShadow;
+				HISM->bCastFarShadow = bCastShadow;
+				HISM->bCastInsetShadow = bCastShadow;
+				HISM->bAffectDynamicIndirectLighting = bCastShadow;
+				HISM->bAffectDistanceFieldLighting = bCastShadow;
+				HISM->bVisibleInRayTracing = bCastShadow;
+				HISM->SetBoundsScale(5.0f);
 			}
 		}
 
