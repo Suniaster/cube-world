@@ -463,6 +463,12 @@ UStaticMesh* UVoxelObject::BakeToStaticMesh(const TMap<uint8, FVoxelMeshData>& B
 
 	TArray<UStaticMeshDescription*> MeshDescriptions;
 	MeshDescriptions.Add(StaticMeshDesc);
+	
+	// Enable Nanite for high-performance rendering of many instances
+	FMeshNaniteSettings NaniteSettings = StaticMesh->GetNaniteSettings();
+	NaniteSettings.bEnabled = true;
+	StaticMesh->SetNaniteSettings(NaniteSettings);
+	
 	StaticMesh->BuildFromStaticMeshDescriptions(MeshDescriptions);
 
 	// Configure basic collision for the baked mesh

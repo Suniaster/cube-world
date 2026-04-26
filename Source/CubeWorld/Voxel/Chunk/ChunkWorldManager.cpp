@@ -7,6 +7,7 @@
 #include "Materials/Material.h"
 #include "ChunkGenerationTask.h"
 #include "../Features/VoxelTreePlacerFeature.h"
+#include "../WorldManager.h"
 #include "Engine/StaticMesh.h"
 
 #if WITH_EDITOR
@@ -18,6 +19,8 @@ AChunkWorldManager::AChunkWorldManager()
 {
 	PrimaryActorTick.bCanEverTick = true;
 	Biomes = GetDefaultBiomeParams();
+
+	WorldManager = CreateDefaultSubobject<UWorldManager>(TEXT("WorldManager"));
 }
 
 void AChunkWorldManager::BeginPlay()
@@ -25,7 +28,10 @@ void AChunkWorldManager::BeginPlay()
 	Super::BeginPlay();
 
 	EnsureMaterial();
-	GenerateTreeArchetypes();
+
+	// Initialize the world manager with archetypes
+	UMaterialInterface* UseTreeMat = TreeMaterial ? TreeMaterial : (TerrainMaterial ? TerrainMaterial : CachedRuntimeMaterial);
+	WorldManager->GenerateArchetypes(TreeParams, BaseTreeCount, Seed, VoxelSize, UseTreeMat);
 
 	// Register active feature generators (placement-only, no voxel stamping)
 	ActiveFeatures.Add(MakeShared<FVoxelTreePlacerFeature, ESPMode::ThreadSafe>(TreeCellSize, 1500.0f, BaseTreeCount));
@@ -33,49 +39,6 @@ void AChunkWorldManager::BeginPlay()
 	// Force an initial chunk load around origin
 	FIntPoint Origin(0, 0);
 	UpdateChunksAroundPlayer(Origin);
-}
-
-void AChunkWorldManager::GenerateTreeArchetypes()
-{
-	UMaterialInterface* UseMat = TreeMaterial ? TreeMaterial : (TerrainMaterial ? TerrainMaterial : CachedRuntimeMaterial);
-	if (!UseMat) return;
-
-	CachedBaseTrees.Empty();
-	BakedTreeMeshes.Empty();
-
-	const FColor WoodColor(101, 67, 33, 255);
-	const FColor LeavesColor(34, 139, 34, 255);
-
-	for (int32 i = 0; i < BaseTreeCount; ++i)
-	{
-		FVoxelTreeData TreeData = FTreeGenerator::GenerateTree(TreeParams, FMath::FloorToInt32(Seed) + i * 100);
-		
-		// Generate voxel mesh data for the tree archetype
-		UVoxelObject::GenerateMeshData(TreeData.Grid, VoxelSize,
-			[&](uint8 BlockType, const FVector& Pos, const FVector& Normal) -> FColor
-			{
-				return (BlockType == TREE_BLOCKTYPE_LEAVES) ? LeavesColor : WoodColor;
-			},
-			TreeData.BlockMeshes);
-		
-		// Bake the mesh data into a StaticMesh for high-performance instancing
-		FString MeshName = FString::Printf(TEXT("BakedTree_%d"), i);
-		UStaticMesh* BakedMesh = UVoxelObject::BakeToStaticMesh(TreeData.BlockMeshes, this, FName(*MeshName));
-		if (BakedMesh)
-		{
-			FTreeGenerator::AddTrunkCollision(BakedMesh, TreeData.TrunkCollision, VoxelSize);
-
-			// Apply material to all sections (Wood and Leaves)
-			for (int32 s = 0; s < TreeData.BlockMeshes.Num(); ++s)
-			{
-				BakedMesh->GetStaticMaterials().Add(FStaticMaterial(UseMat));
-			}
-			
-			BakedTreeMeshes.Add(BakedMesh);
-			CachedBaseTrees.Add(TreeData);
-		}
-	}
-	UE_LOG(LogTemp, Warning, TEXT("Voxel: Generated %d tree archetypes and baked meshes."), BakedTreeMeshes.Num());
 }
 
 void AChunkWorldManager::EnsureMaterial()
@@ -226,23 +189,11 @@ int32 AChunkWorldManager::CalculateLODForColumn(FIntPoint ColumnCoord, FIntPoint
 
 void AChunkWorldManager::UnloadChunkColumn(FIntPoint Coord)
 {
-	// Remove HISM instances for this column
-	if (FColumnTreeInstances* Instances = ColumnTreeInstances.Find(Coord))
-	{
-		for (auto& Pair : Instances->Components)
-		{
-			if (Pair.Value) Pair.Value->DestroyComponent();
-		}
-		ColumnTreeInstances.Remove(Coord);
-	}
+	// Unload from WorldManager (Global HISM)
+	WorldManager->ClearInstancesForChunk(Coord);
 
-	// Use the cached max height to limit the Z scan; fall back to MaxZLayersLimit if unknown.
-	const int32 CachedMaxHeight = ColumnMaxHeightCache.FindRef(Coord);
-	const int32 MaxZLayers = (CachedMaxHeight > 0)
-		? FMath::Clamp(FMath::CeilToInt32(static_cast<float>(CachedMaxHeight) / static_cast<float>(ChunkHeight)) + 1, 1, MaxZLayersLimit)
-		: MaxZLayersLimit;
-
-	for (int32 Z = 0; Z < MaxZLayers; ++Z)
+	// Unload vertical voxel chunks
+	for (int32 Z = 0; Z < MaxZLayersLimit; ++Z)
 	{
 		FIntVector Key(Coord.X, Coord.Y, Z);
 		AWorldChunk** Found = LoadedChunks.Find(Key);
@@ -252,13 +203,8 @@ void AChunkWorldManager::UnloadChunkColumn(FIntPoint Coord)
 			LoadedChunks.Remove(Key);
 		}
 	}
-	InFlightTasks.Remove(Coord);
-	ColumnMaxHeightCache.Remove(Coord);
 
-
-	// If this column was part of a LOD 3 sector, evict it so the sector is rebuilt.
 	RemoveColumnFromSector(Coord);
-
 	LoadedColumns.Remove(Coord);
 	ColumnLODs.Remove(Coord);
 }
@@ -405,10 +351,13 @@ bool AChunkWorldManager::CompareColumnPriority(const FIntPoint& A, const FIntPoi
 
 void AChunkWorldManager::PostApplyChunk(const FChunkGenerationResult& Result, UMaterialInterface* Material)
 {
+	// When any voxel data is applied, ensure the low-detail heightmap is removed
 	RemoveColumnFromSector(Result.ChunkCoord);
+
+	// Only update trees for the base layer (Z=0)
 	if (Result.ZLayer == 0)
 	{
-		UpdateTreeInstancesForColumn(Result.ChunkCoord, Result.FeaturePlacements, Result.LODLevel);
+		WorldManager->UpdateInstancesForChunk(Result.ChunkCoord, Result.FeaturePlacements, Result.LODLevel, VoxelSize);
 	}
 }
 
@@ -487,139 +436,9 @@ void AChunkWorldManager::ProcessFinishedTasks()
 	}
 }
 
-void AChunkWorldManager::ClearTreeInstancesForColumn(FIntPoint Coord)
-{
-	if (FColumnTreeInstances* Instances = ColumnTreeInstances.Find(Coord))
-	{
-		for (auto& Pair : Instances->Components)
-		{
-			if (Pair.Value)
-			{
-				Pair.Value->ClearInstances();
-			}
-		}
-	}
-}
-
-void AChunkWorldManager::UpdateTreeInstancesForColumn(FIntPoint Coord, const TArray<FFeaturePlacement>& Placements, int32 LODLevel)
-{
-	// 1. If we already have HISMs for this column, just clear their instances for reuse.
-	// This is MUCH faster than destroying/recreating components.
-	FColumnTreeInstances* TargetInstances = ColumnTreeInstances.Find(Coord);
-	if (TargetInstances)
-	{
-		for (auto& Pair : TargetInstances->Components)
-		{
-			if (Pair.Value)
-			{
-				Pair.Value->ClearInstances();
-				Pair.Value->MarkRenderStateDirty();
-			}
-		}
-	}
-
-	if (Placements.IsEmpty()) return;
-
-	// 2. If no entry exists yet, create it.
-	if (!TargetInstances)
-	{
-		TargetInstances = &ColumnTreeInstances.Add(Coord);
-	}
-
-	int32 AddedCount = 0;
-	const bool bHasCollision = (LODLevel == 0);
-	const bool bCastShadow = (LODLevel <= 1);
-
-	for (const FFeaturePlacement& Placement : Placements)
-	{
-		if (!BakedTreeMeshes.IsValidIndex(Placement.ArchetypeIndex)) continue;
-
-		UHierarchicalInstancedStaticMeshComponent* HISM = TargetInstances->Components.FindRef(Placement.ArchetypeIndex);
-
-		if (!HISM)
-		{
-			HISM = NewObject<UHierarchicalInstancedStaticMeshComponent>(this);
-			HISM->SetStaticMesh(BakedTreeMeshes[Placement.ArchetypeIndex]);
-
-			// Only LOD 0 trees have collision
-			HISM->bAlwaysCreatePhysicsState = bHasCollision;
-			HISM->SetCollisionEnabled(bHasCollision ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
-			if (bHasCollision)
-			{
-				HISM->SetCollisionObjectType(ECC_WorldStatic);
-				HISM->SetCollisionResponseToAllChannels(ECR_Block);
-			}
-
-			// Trees up to LOD 2 have shadows
-			HISM->SetCastShadow(bCastShadow);
-			HISM->bCastDynamicShadow = bCastShadow;
-			HISM->bCastFarShadow = bCastShadow;
-			HISM->bCastInsetShadow = bCastShadow;
-			HISM->bAffectDynamicIndirectLighting = bCastShadow;
-			HISM->bAffectDistanceFieldLighting = bCastShadow;
-			HISM->bVisibleInRayTracing = bCastShadow;
-			HISM->SetBoundsScale(5.0f); // Increase bounds scale to prevent premature shadow culling for small tree clusters
-
-			HISM->AttachToComponent(GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
-			HISM->RegisterComponent();
-
-			TargetInstances->Components.Add(Placement.ArchetypeIndex, HISM);
-		}
-		else
-		{
-			// Update collision settings if LOD changed but we are reusing the component
-			if (HISM->GetCollisionEnabled() != (bHasCollision ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision))
-			{
-				HISM->SetCollisionEnabled(bHasCollision ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
-				HISM->bAlwaysCreatePhysicsState = bHasCollision;
-			}
-
-			// Update shadow settings if LOD changed but we are reusing the component
-			if (HISM->CastShadow != bCastShadow)
-			{
-				HISM->SetCastShadow(bCastShadow);
-				HISM->bCastDynamicShadow = bCastShadow;
-				HISM->bCastFarShadow = bCastShadow;
-				HISM->bCastInsetShadow = bCastShadow;
-				HISM->bAffectDynamicIndirectLighting = bCastShadow;
-				HISM->bAffectDistanceFieldLighting = bCastShadow;
-				HISM->bVisibleInRayTracing = bCastShadow;
-				HISM->SetBoundsScale(5.0f);
-			}
-		}
-
-		const FVoxelTreeData& Archetype = CachedBaseTrees[Placement.ArchetypeIndex];
-		FVector Pos = Placement.WorldPosition;
-		Pos.X -= (Archetype.CenterOffset.X + 0.5f) * VoxelSize;
-		Pos.Y -= (Archetype.CenterOffset.Y + 0.5f) * VoxelSize;
-		Pos.Z -= Archetype.CenterOffset.Z * VoxelSize;
-
-		FTransform Transform(FRotator::ZeroRotator, Pos);
-		HISM->AddInstance(Transform, false);
-		AddedCount++;
-	}
-
-	// 3. Mark dirty to trigger a re-render. 
-	// Removed synchronous BuildTreeIfOutdated(true, true) and RecreatePhysicsState()
-	// as they cause massive lag spikes. UE will handle the updates lazily/optimally.
-	for (auto& Pair : TargetInstances->Components)
-	{
-		if (Pair.Value)
-		{
-			Pair.Value->MarkRenderStateDirty();
-		}
-	}
-
-	if (AddedCount > 0)
-	{
-		UE_LOG(LogTemp, Verbose, TEXT("Voxel: Updated %d tree instances in column (%d, %d) at LOD %d"), AddedCount, Coord.X, Coord.Y, LODLevel);
-	}
-}
-
 void AChunkWorldManager::HandleHeightmapResult(const FChunkGenerationResult& Result, TArray<AWorldChunk*>& OutPendingDestroy)
 {
-	// Ensure tree instances are cleared for heightmap LODs (LOD 3+)
-	ClearTreeInstancesForColumn(Result.ChunkCoord);
+	WorldManager->ClearInstancesForChunk(Result.ChunkCoord);
 
 	// Defer eviction of old Z-layer voxel actors until after FlushDirtySectors()
 	// uploads the replacement sector mesh. This prevents a 1-frame visibility gap.

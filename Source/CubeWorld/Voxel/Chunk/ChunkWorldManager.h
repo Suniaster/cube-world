@@ -10,13 +10,7 @@
 #include "ChunkWorldManager.generated.h"
 
 class AWorldChunk;
-
-/** Tracks HISM components belonging to a specific column. */
-struct FColumnTreeInstances
-{
-	/** HISM components mapped by archetype index. Created locally for this column. */
-	TMap<int32, UHierarchicalInstancedStaticMeshComponent*> Components;
-};
+class UWorldManager;
 
 /**
  * Manages dynamic loading/unloading of terrain chunks around the player.
@@ -35,8 +29,6 @@ public:
 protected:
 	virtual void BeginPlay() override;
 
-	// ── Terrain shape ───────────────────────────────────────────────────
-
 	/** Number of voxel columns per chunk side (e.g. 16 = 16x16 grid). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Chunks")
 	int32 ChunkSize = 64;
@@ -44,8 +36,6 @@ protected:
 	/** Vertical height of each chunk layer in voxel rows. Chunks stack vertically as needed. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Chunks")
 	int32 ChunkHeight = 256;
-
-
 
 	/** World-space size of one cube in UU. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Chunks")
@@ -134,6 +124,10 @@ protected:
 	int32 MaxTreeLOD = 2;
 
 private:
+	/** Manages all non-voxel world objects (trees, structures). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
+	UWorldManager* WorldManager;
+
 	/** Currently loaded chunks, keyed by 3D chunk coordinate (X, Y, Z layer). */
 	TMap<FIntVector, AWorldChunk*> LoadedChunks;
 
@@ -173,27 +167,8 @@ private:
 	UPROPERTY()
 	UMaterialInterface* CachedRuntimeWaterMaterial;
 
-	/** Array of generated base tree archetypes. Each archetype has its mesh pre-baked. */
-	TArray<FVoxelTreeData> CachedBaseTrees;
-
 	/** Thread-safe array of active feature generators passed to chunks */
 	TArray<TSharedPtr<const IVoxelFeatureGenerator, ESPMode::ThreadSafe>> ActiveFeatures;
-
-	/** Tree instances currently alive, keyed by chunk XY column coord. */
-	TMap<FIntPoint, FColumnTreeInstances> ColumnTreeInstances;
-
-	/** Baked static meshes for each tree archetype. */
-	UPROPERTY()
-	TArray<class UStaticMesh*> BakedTreeMeshes;
-
-	/** Pre-generates tree archetypes and bakes their meshes once. */
-	void GenerateTreeArchetypes();
-
-	/** Clears all tree instances for a specific column without destroying the components. */
-	void ClearTreeInstancesForColumn(FIntPoint Coord);
-
-	/** Adds instances to HISM for a column based on FeaturePlacements. */
-	void UpdateTreeInstancesForColumn(FIntPoint Coord, const TArray<FFeaturePlacement>& Placements, int32 LODLevel);
 
 	// ── LOD 3 Sector Batching ────────────────────────────────────────────
 	// Instead of one actor per LOD-3 column (~14K draw calls), we group
