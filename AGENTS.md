@@ -14,6 +14,7 @@ Whenever implementing logic, creating classes, handling game mechanics, or build
 - If something goes sideways, STOP and re-plan immediately — don't keep pushing
 - Use plan mode for verification steps, not just building
 - Write detailed specs upfront to reduce ambiguity
+- If its a problem that is better separated and verified in two different steps, create two different plans and save them under the `Plans/` folder.
 
 ## 3. Demand Elegance (Balanced)
 - For non-trivial changes: pause and ask "is there a more elegant way?"
