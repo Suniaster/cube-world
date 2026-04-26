@@ -5,6 +5,8 @@
 #include "MeshDescription.h"
 #include "StaticMeshAttributes.h"
 #include "StaticMeshDescription.h"
+#include "PhysicsEngine/BodySetup.h"
+#include "PhysicsEngine/BoxElem.h"
 
 struct FGreedyQuad
 {
@@ -356,7 +358,6 @@ UProceduralMeshComponent* UVoxelObject::Spawn(AActor* Owner, UMaterialInterface*
 		if (Root) MeshComponent->AttachToComponent(Root, FAttachmentTransformRules::KeepRelativeTransform);
 		else      Owner->SetRootComponent(MeshComponent);
 		
-		MeshComponent->bUseComplexAsSimpleCollision = true;
 		MeshComponent->bUseAsyncCooking = true; // Offload Physic/Chaos baking to background threads
 	}
 
@@ -463,6 +464,21 @@ UStaticMesh* UVoxelObject::BakeToStaticMesh(const TMap<uint8, FVoxelMeshData>& B
 	TArray<UStaticMeshDescription*> MeshDescriptions;
 	MeshDescriptions.Add(StaticMeshDesc);
 	StaticMesh->BuildFromStaticMeshDescriptions(MeshDescriptions);
+
+	// Configure basic collision for the baked mesh
+	StaticMesh->bAllowCPUAccess = true;
+	StaticMesh->NeverStream = true;
+	if (UBodySetup* BodySetup = StaticMesh->GetBodySetup())
+	{
+		BodySetup->CollisionTraceFlag = CTF_UseSimpleAndComplex;
+		BodySetup->bNeverNeedsCookedCollisionData = false;
+		BodySetup->InvalidatePhysicsData();
+		BodySetup->CreatePhysicsMeshes();
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("Voxel: Failed to get BodySetup for StaticMesh '%s'!"), *Name.ToString());
+	}
 
 	UE_LOG(LogTemp, Warning, TEXT("Voxel: Baked StaticMesh '%s' with %d triangles."), *Name.ToString(), TotalTriangles);
 

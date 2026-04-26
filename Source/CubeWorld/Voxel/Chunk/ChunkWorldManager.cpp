@@ -63,6 +63,8 @@ void AChunkWorldManager::GenerateTreeArchetypes()
 		UStaticMesh* BakedMesh = UVoxelObject::BakeToStaticMesh(TreeData.BlockMeshes, this, FName(*MeshName));
 		if (BakedMesh)
 		{
+			FTreeGenerator::AddTrunkCollision(BakedMesh, TreeData.TrunkCollision, VoxelSize);
+
 			// Apply material to all sections (Wood and Leaves)
 			for (int32 s = 0; s < TreeData.BlockMeshes.Num(); ++s)
 			{
@@ -514,11 +516,11 @@ void AChunkWorldManager::UpdateTreeInstancesForColumn(FIntPoint Coord, const TAr
 		if (!HISM)
 		{
 			HISM = NewObject<UHierarchicalInstancedStaticMeshComponent>(this);
-			HISM->RegisterComponent();
 			HISM->SetStaticMesh(BakedTreeMeshes[Placement.ArchetypeIndex]);
 			
 			// Only LOD 0 trees have collision
 			const bool bHasCollision = (LODLevel == 0);
+			HISM->bAlwaysCreatePhysicsState = bHasCollision;
 			HISM->SetCollisionEnabled(bHasCollision ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
 			if (bHasCollision)
 			{
@@ -527,6 +529,7 @@ void AChunkWorldManager::UpdateTreeInstancesForColumn(FIntPoint Coord, const TAr
 			}
 
 			HISM->AttachToComponent(GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
+			HISM->RegisterComponent();
 			
 			LocalHISMs.Add(Placement.ArchetypeIndex, HISM);
 			NewInstances.Components.Add(HISM);
@@ -534,19 +537,21 @@ void AChunkWorldManager::UpdateTreeInstancesForColumn(FIntPoint Coord, const TAr
 
 		const FVoxelTreeData& Archetype = CachedBaseTrees[Placement.ArchetypeIndex];
 		FVector Pos = Placement.WorldPosition;
-		Pos.X -= Archetype.CenterOffset.X * VoxelSize;
-		Pos.Y -= Archetype.CenterOffset.Y * VoxelSize;
+		Pos.X -= (Archetype.CenterOffset.X + 0.5f) * VoxelSize;
+		Pos.Y -= (Archetype.CenterOffset.Y + 0.5f) * VoxelSize;
 		Pos.Z -= Archetype.CenterOffset.Z * VoxelSize;
 
 		FTransform Transform(FRotator::ZeroRotator, Pos);
-		HISM->AddInstance(Transform, false); // Don't rebuild yet
+		HISM->AddInstance(Transform, false); 
 		AddedCount++;
 	}
 
-	// Mark components for render update once batching is complete
+	// Finalize instances and rebuild cluster tree for collision/culling
 	for (auto& Pair : LocalHISMs)
 	{
 		Pair.Value->MarkRenderStateDirty();
+		Pair.Value->BuildTreeIfOutdated(true, true);
+		Pair.Value->RecreatePhysicsState();
 	}
 
 	if (AddedCount > 0)
@@ -627,6 +632,12 @@ bool AChunkWorldManager::HandleVoxelResult(const FChunkGenerationResult& Result)
 		{
 			(*ExistingChunkPtr)->Destroy();
 			LoadedChunks.Remove(Key);
+		}
+
+		// Even if empty, ZLayer 0 must call PostApplyChunk to update trees for this column
+		if (Result.ZLayer == 0)
+		{
+			PostApplyChunk(Result, UseMat);
 		}
 	}
 	return false;

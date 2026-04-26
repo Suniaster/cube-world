@@ -228,6 +228,36 @@ void FChunkGenerationTask::GenerateVoxelLayers(
 		Result.bSuccess        = true;
 		Result.bHasAnyBlocks   = bHasAnyBlocks;
 
+		// 3. Compute feature placements (ZLayer 0 only — trees are independent instances)
+		if (ZLayerIdx == 0 && LODLevel <= MaxTreeLOD)
+		{
+			FChunkPlacementContext PlacementContext{
+				ChunkCoord,
+				ChunkSize,
+				VoxelSize,
+				EffectiveChunkSize,
+				EffectiveVoxelSize,
+				static_cast<float>(ChunkCoord.X) * ChunkSize * VoxelSize,
+				static_cast<float>(ChunkCoord.Y) * ChunkSize * VoxelSize,
+				BiomeCellSize,
+				Seed,
+				Biomes,
+				BlendWidth,
+				WaterLevel,
+				HeightMap,
+				BlockTypeMap,
+				MapWidth
+			};
+
+			for (const auto& Feature : Features)
+			{
+				if (Feature.IsValid())
+				{
+					Feature->ComputePlacements(PlacementContext, Result.FeaturePlacements);
+				}
+			}
+		}
+
 		if (bHasAnyBlocks)
 		{
 			FVoxelGrid3D Grid(EffectiveChunkSize, EffectiveChunkSize, EffectiveChunkHeight);
@@ -308,36 +338,6 @@ void FChunkGenerationTask::GenerateVoxelLayers(
 					{
 						SetNeighborBit(1, 0, XBitIdx, true); SetNeighborBit(1, 1, XBitIdx, true);
 						SetNeighborBit(2, 0, YBitIdx, true); SetNeighborBit(2, 1, YBitIdx, true);
-					}
-				}
-			}
-
-			// 3. Compute feature placements (ZLayer 0 only — trees are independent instances)
-			if (ZLayerIdx == 0 && LODLevel <= MaxTreeLOD)
-			{
-				FChunkPlacementContext PlacementContext{
-					ChunkCoord,
-					ChunkSize,
-					VoxelSize,
-					EffectiveChunkSize,
-					EffectiveVoxelSize,
-					static_cast<float>(ChunkCoord.X) * ChunkSize * VoxelSize,
-					static_cast<float>(ChunkCoord.Y) * ChunkSize * VoxelSize,
-					BiomeCellSize,
-					Seed,
-					Biomes,
-					BlendWidth,
-					WaterLevel,
-					HeightMap,
-					BlockTypeMap,
-					MapWidth
-				};
-
-				for (const auto& Feature : Features)
-				{
-					if (Feature.IsValid())
-					{
-						Feature->ComputePlacements(PlacementContext, Result.FeaturePlacements);
 					}
 				}
 			}

@@ -49,9 +49,21 @@ struct FVoxelTreeParams
 
 	/** Voxel radius of the trunk cylinder. 0 = single-voxel trunk. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trunk")
-	float TrunkRadius = 1.f;
+	float TrunkRadius = 1.5f;
 };
 
+
+USTRUCT(BlueprintType)
+struct FVoxelTreeCollision
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
+	FVector Center;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
+	FVector Size;
+};
 
 USTRUCT(BlueprintType)
 struct FVoxelTreeData
@@ -67,6 +79,10 @@ struct FVoxelTreeData
 
 	/** Pre-built mesh data, ready to be uploaded to a ProceduralMeshComponent on the game thread. */
 	TMap<uint8, FVoxelMeshData> BlockMeshes;
+
+	/** Simplified collision for the trunk area in voxel units. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tree")
+	FVoxelTreeCollision TrunkCollision;
 };
 
 /** 
@@ -78,4 +94,7 @@ struct FTreeGenerator
 public:
 	/** Generates a single tree. Returns a VoxelGrid3D containing the generated blocks (centered near XY center). */
 	static FVoxelTreeData GenerateTree(const FVoxelTreeParams& Params, int32 Seed);
+
+	/** Configures simple trunk collision for a runtime-baked static mesh. */
+	static void AddTrunkCollision(class UStaticMesh* Mesh, const FVoxelTreeCollision& Collision, float VoxelSize);
 };

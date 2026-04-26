@@ -33,8 +33,9 @@ void FVoxelTreePlacerFeature::ComputePlacements(const FChunkPlacementContext& Co
 
 			const float OffsetX = CellRandom.FRandRange(-CellSize * 0.35f, CellSize * 0.35f);
 			const float OffsetY = CellRandom.FRandRange(-CellSize * 0.35f, CellSize * 0.35f);
-			const float WorldX = CellWorldX + OffsetX;
-			const float WorldY = CellWorldY + OffsetY;
+			// Snap to world voxel center for perfect grid alignment in a cube world.
+			const float WorldX = (FMath::FloorToFloat((CellWorldX + OffsetX) / Context.VoxelSize) + 0.5f) * Context.VoxelSize;
+			const float WorldY = (FMath::FloorToFloat((CellWorldY + OffsetY) / Context.VoxelSize) + 0.5f) * Context.VoxelSize;
 
 			// Skip if not within this chunk's footprint
 			if (WorldX < ChunkMinX || WorldX >= ChunkMaxX || WorldY < ChunkMinY || WorldY >= ChunkMaxY)

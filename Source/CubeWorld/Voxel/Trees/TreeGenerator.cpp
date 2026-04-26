@@ -1,5 +1,8 @@
 #include "TreeGenerator.h"
 #include "Math/RandomStream.h"
+#include "Engine/StaticMesh.h"
+#include "PhysicsEngine/BodySetup.h"
+#include "PhysicsEngine/BoxElem.h"
 
 struct FScaNode
 {
@@ -128,12 +131,12 @@ FVoxelTreeData FTreeGenerator::GenerateTree(const FVoxelTreeParams& Params, int3
 	}
 
 	const float Padding = FMath::Max(Params.FoliageRadius, Params.TrunkRadius) + 2.0f;
-	MinBounds -= FVector(Padding, Padding, Padding);
-	MaxBounds += FVector(Padding, Padding, Padding);
+	MinBounds = FVector(FMath::FloorToFloat(MinBounds.X - Padding), FMath::FloorToFloat(MinBounds.Y - Padding), FMath::FloorToFloat(MinBounds.Z - Padding));
+	MaxBounds = FVector(FMath::CeilToFloat(MaxBounds.X + Padding), FMath::CeilToFloat(MaxBounds.Y + Padding), FMath::CeilToFloat(MaxBounds.Z + Padding));
 
-	const int32 GridSizeX = FMath::CeilToInt32(MaxBounds.X - MinBounds.X);
-	const int32 GridSizeY = FMath::CeilToInt32(MaxBounds.Y - MinBounds.Y);
-	const int32 GridSizeZ = FMath::CeilToInt32(MaxBounds.Z - MinBounds.Z);
+	const int32 GridSizeX = FMath::RoundToInt32(MaxBounds.X - MinBounds.X);
+	const int32 GridSizeY = FMath::RoundToInt32(MaxBounds.Y - MinBounds.Y);
+	const int32 GridSizeZ = FMath::RoundToInt32(MaxBounds.Z - MinBounds.Z);
 
 	FVoxelTreeData Result;
 	Result.Grid = FVoxelGrid3D(GridSizeX, GridSizeY, GridSizeZ);
@@ -142,6 +145,11 @@ FVoxelTreeData FTreeGenerator::GenerateTree(const FVoxelTreeParams& Params, int3
 		FMath::FloorToInt32(-MinBounds.Y),
 		FMath::FloorToInt32(-MinBounds.Z)
 	);
+	
+	// Define trunk collision box in Grid space (voxel units)
+	// Trunk is centered on the voxel grid, so we add 0.5 offset to X and Y.
+	Result.TrunkCollision.Center = FVector(Result.CenterOffset) + FVector(0.5f, 0.5f, Params.TrunkHeight * 0.5f);
+	Result.TrunkCollision.Size = FVector(Params.TrunkRadius * 2.f, Params.TrunkRadius * 2.f, Params.TrunkHeight);
 
 	auto WorldToGrid = [&](const FVector& Pos) -> FIntVector
 	{
@@ -230,4 +238,23 @@ FVoxelTreeData FTreeGenerator::GenerateTree(const FVoxelTreeParams& Params, int3
 		}
 	}
 	return Result;
+}
+
+void FTreeGenerator::AddTrunkCollision(UStaticMesh* Mesh, const FVoxelTreeCollision& Collision, float VoxelSize)
+{
+	if (!Mesh) return;
+
+	if (UBodySetup* BodySetup = Mesh->GetBodySetup())
+	{
+		FKAggregateGeom& AggGeom = BodySetup->AggGeom;
+		FKBoxElem BoxElem;
+		BoxElem.Center = Collision.Center * VoxelSize;
+		BoxElem.X = Collision.Size.X * VoxelSize;
+		BoxElem.Y = Collision.Size.Y * VoxelSize;
+		BoxElem.Z = Collision.Size.Z * VoxelSize;
+		AggGeom.BoxElems.Add(BoxElem);
+
+		BodySetup->InvalidatePhysicsData();
+		BodySetup->CreatePhysicsMeshes();
+	}
 }
