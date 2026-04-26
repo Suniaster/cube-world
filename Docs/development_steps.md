@@ -17,14 +17,14 @@ Steps to creating the game:
     - Player starts above origin to avoid terrain clipping (Done)
     - Have the world have a nonflat shape (Done)
     - Optimize for more chunk rendering (Done)
-        - Implemented and fixed greedy meshing algorithm
+        - Implemented and fixed greedy meshing algorithm (Done) 
     - Refactored voxel mesh generation into `UVoxelObject` (Done)
     - Refactored voxel system to support block types and dynamic coloring (Done)
     - Reorganized chunk-related code into `Source/CubeWorld/Voxel/Chunk` (Done)
     - Add some montains (Done)
-    - Optimize triangle count
-        - Remove quads on the chunk border
-    - Add body of water (lakes and rivers)
+    - Optimize triangle count (Done)
+        - Remove quads on the chunk border (Done)
+    - Add body of water (lakes and rivers) (Done) 
     - Add props to make the world more vivid (trees, grass)
     - Create a simple sky
 - Creating a simple enemy:
